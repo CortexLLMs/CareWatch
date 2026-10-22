@@ -1,0 +1,57 @@
+# Dependencies
+node_modules/
+.npm
+
+# Build output
+dist/
+build/
+
+# Environment
+.env
+.env.local
+.env.production
+
+# Database (don't push your local DB)
+*.db
+*.db-shm
+*.db-wal
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Archives & données locales
+*.zip
+backend.zip
+rag_workspace/
+api (1).js
+
+# Artefacts LaTeX (garder main.tex + main.pdf)
+*.aux
+*.lof
+*.out
+*.toc
+*.fls
+*.fdb_latexmk
+
+# Copies obsolètes hors src/ (non utilisées par le build)
+/frontend/App.jsx
+/frontend/App.css
+/frontend/index.css
+
+# Fichiers d'environnement (garder l'exemple)
+.env.*
+!.env.example
+
+# Logs
+*.log
+npm-debug.log*
+
+# Vite
+*.local
