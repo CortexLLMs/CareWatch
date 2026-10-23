@@ -191,6 +191,17 @@ const dict = {
 
     "dis.title": "Pas un dispositif médical.",
     "dis.text": "CareWatch estime les signaux physiologiques via une webcam, uniquement pour le bien-être. Il n'est pas validé pour un diagnostic clinique. En cas de malaise, consultez un professionnel de santé.",
+
+    "rep.title": "Rapport mensuel",
+    "rep.sub": "Synthèse des constantes et des alertes, au format compte rendu d'analyse.",
+    "rep.month": "Mois",
+    "rep.days": "jours avec mesures",
+    "rep.alerts": "alertes",
+    "rep.download": "Télécharger le rapport PDF",
+    "rep.generating": "Génération…",
+    "rep.empty": "Aucune donnée enregistrée pour ce mois. Lancez une session pour alimenter le rapport.",
+    "rep.note": "Document non diagnostique. Les données restent sur cet appareil.",
+    "rep.error": "La génération du rapport a échoué.",
   },
 
   en: {
@@ -377,6 +388,17 @@ const dict = {
 
     "dis.title": "Not a medical device.",
     "dis.text": "CareWatch estimates physiological signals from a webcam for wellness awareness only. It is not validated for clinical diagnosis. If you feel unwell, consult a healthcare professional.",
+
+    "rep.title": "Monthly report",
+    "rep.sub": "Summary of vital signs and alerts, formatted as an analysis report.",
+    "rep.month": "Month",
+    "rep.days": "days with measurements",
+    "rep.alerts": "alerts",
+    "rep.download": "Download PDF report",
+    "rep.generating": "Generating…",
+    "rep.empty": "No data recorded for this month. Start a session to populate the report.",
+    "rep.note": "Non-diagnostic document. Data stays on this device.",
+    "rep.error": "Report generation failed.",
   },
 
   ar: {

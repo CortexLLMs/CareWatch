@@ -20,8 +20,10 @@ import Disclaimer from "./Disclaimer";
 import SelfReport from "./SelfReport";
 import {
   IconHeart, IconLung, IconBrain, IconFlame, IconSparkle, IconShield,
-  IconPlay, IconStop, IconCheck, IconAlert
+  IconPlay, IconStop, IconCheck, IconAlert, IconSun, IconMoon
 } from "./Icons";
+import MonthlyReport from "./MonthlyReport";
+import { recordSample, addSeconds, recordAlert } from "../lib/history";
 import {
   checkBackend, startSession as apiStartSession, endSession as apiEndSession,
   saveMetrics as apiSaveMetrics, saveAlert as apiSaveAlert, saveSelfReport
@@ -130,9 +132,23 @@ export default function Dashboard({ medData, onMedUpdate, onReset }) {
 
   useEffect(() => {
     if (!running) { sessSecs.current = 0; return; }
-    const id = setInterval(() => { sessSecs.current++; force((n) => n + 1); }, 1000);
+    const id = setInterval(() => {
+      sessSecs.current++;
+      addSeconds(1);
+      force((n) => n + 1);
+    }, 1000);
     return () => clearInterval(id);
   }, [running]);
+
+  // Navigation latérale : chaque entrée amène à sa section (ancres).
+  const NAV_ANCHOR = {
+    dash: "cw-overview", meds: "cw-meds", alerts: "cw-alerts",
+    session: "cw-sessions", settings: "cw-settings",
+  };
+  useEffect(() => {
+    const id = NAV_ANCHOR[active];
+    if (id) document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [active]);
 
   /* ─── Start / Stop ─── */
   const startSession = useCallback(async () => {
@@ -246,6 +262,7 @@ export default function Dashboard({ medData, onMedUpdate, onReset }) {
               ...(contact && !contact.includes("@") ? { telegram: contact } : {}),
             };
             alertPostAt.current["emergency"] = Date.now();
+            recordAlert("emergency");
             apiSaveAlert(sessId, {
               type: "emergency", severity: "critical",
               message: tRef.current("alerts.lbl.emergency"),
@@ -405,6 +422,11 @@ export default function Dashboard({ medData, onMedUpdate, onReset }) {
         });
 
         // ─── 5. Save to backend ───
+        recordSample({
+          heartRate: hr, oxygen, drowsiness,
+          yawnLevel: yawnPct, grimace: g.score,
+          confidence, rmssd: hrvMetrics?.rmssd,
+        });
         if (hasSignal) {
           apiSaveMetrics(sessId, {
             heartRate: hr, oxygen, drowsiness, arousal: hrvMetrics?.arousal,
@@ -442,6 +464,7 @@ export default function Dashboard({ medData, onMedUpdate, onReset }) {
           const last = alertPostAt.current[tr.type] || 0;
           if (now - last < ALERT_POST_MS) return;
           alertPostAt.current[tr.type] = now;
+          recordAlert(tr.type);
           apiSaveAlert(sessId, { type: tr.type, severity: tr.severity, message: tr.label }, notify);
         });
         setAlerts(triggers);
@@ -535,7 +558,7 @@ export default function Dashboard({ medData, onMedUpdate, onReset }) {
               <button onClick={toggleTheme} title={t(theme === "dark" ? "theme.light" : "theme.dark")} className="mono" style={{
                 border: "1px solid var(--line)", background: "var(--bg-2)", color: "var(--fg-mute)",
                 borderRadius: "var(--r-sm)", padding: "5px 9px", fontSize: 11, cursor: "pointer"
-              }}>{theme === "dark" ? "☀️" : "🌙"}</button>
+              }}>{theme === "dark" ? <IconSun size={13}/> : <IconMoon size={13}/>}</button>
               <button onClick={cycleLang} title="FR / EN / AR" className="mono" style={{
                 border: "1px solid var(--line)", background: "var(--bg-2)", color: "var(--fg-mute)",
                 borderRadius: "var(--r-sm)", padding: "5px 9px", fontSize: 11, cursor: "pointer"
@@ -575,7 +598,7 @@ export default function Dashboard({ medData, onMedUpdate, onReset }) {
 
         <div className="cw-content" style={{ padding: 28, display: "flex", flexDirection: "column", gap: 20, overflowY: "auto" }}>
           {/* Hero */}
-          <section className="cw-grid-hero" style={{ display: "grid", gridTemplateColumns: "minmax(0, 380px) 1fr", gap: 20 }}>
+          <section id="cw-overview" className="cw-grid-hero" style={{ display: "grid", gridTemplateColumns: "minmax(0, 380px) 1fr", gap: 20 }}>
             <div style={{ background: "var(--bg-1)", border: "1px solid var(--line)", borderRadius: "var(--r-lg)", padding: 20, position: "relative", overflow: "hidden" }}>
               <div style={{ position: "absolute", inset: 0, background: `radial-gradient(60% 80% at 50% 100%, ${scoreColor}1F, transparent 70%)`, pointerEvents: "none" }}/>
               <div style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
@@ -698,9 +721,13 @@ export default function Dashboard({ medData, onMedUpdate, onReset }) {
               videoRef={videoRef} canvasRef={canvasRef} overlayRef={overlayRef}
               backendOk={backendOk} bodyReady={bodyReady} gesture={gesture} emergency={emergency}
             />
-            <AlertsCard alerts={alerts}/>
-            <MedPanel medData={medData} onUpdate={onMedUpdate}/>
-            <NotifyCard contact={medData?.contact}/>
+            <div id="cw-alerts" style={{ minWidth: 0 }}><AlertsCard alerts={alerts}/></div>
+            <div id="cw-meds" style={{ minWidth: 0 }}><MedPanel medData={medData} onUpdate={onMedUpdate}/></div>
+            <div id="cw-settings" style={{ minWidth: 0 }}><NotifyCard contact={medData?.contact}/></div>
+          </section>
+
+          <section style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }}>
+            <MonthlyReport patient={medData?.contact || ""} />
           </section>
         </div>
       </main>

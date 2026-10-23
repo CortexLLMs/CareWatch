@@ -1,347 +1,110 @@
-# 🏥 CareWatch — AI Health Monitoring Platform
+# CareWatch
 
-> Real-time health analysis powered by webcam AI. Detect stress, fatigue, anxiety, burnout, and monitor heart rate — all from your browser.
+Surveillance physiologique par webcam, exécutée dans le navigateur. CareWatch
+estime la fréquence cardiaque et la variabilité cardiaque par
+photoplethysmographie distante (rPPG), analyse la posture, les mains et les
+expressions faciales, puis produit un rapport mensuel traçable au format d'un
+compte rendu d'analyse.
 
-[![CI](https://github.com/CortexLLMs/CareWatch/actions/workflows/ci.yml/badge.svg)](https://github.com/CortexLLMs/CareWatch/actions/workflows/ci.yml)
-[![Deploy GitHub Pages](https://github.com/CortexLLMs/CareWatch/actions/workflows/deploy-pages.yml/badge.svg)](https://github.com/CortexLLMs/CareWatch/actions/workflows/deploy-pages.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-green?style=flat-square)](LICENSE)
-[![Live demo](https://img.shields.io/badge/Live%20demo-GitHub%20Pages-1b56ff?style=flat-square)](https://cortexllms.github.io/CareWatch/)
+Projet open source sous licence MIT, développé pour le hackathon HACK4BLADI.
 
-![CareWatch](https://img.shields.io/badge/CareWatch-v3.0-00d4ff?style=for-the-badge&logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IiMwMGQ0ZmYiIHN0cm9rZS13aWR0aD0iMiI+PHBhdGggZD0iTTIyIDEyaC00bC0zIDlMOSAzTDYgMTJIMiIvPjwvc3ZnPg==)
-![React](https://img.shields.io/badge/React-19.2.6-61DAFB?style=flat-square&logo=react)
-![Node.js](https://img.shields.io/badge/Node.js-Express-339933?style=flat-square&logo=node.js)
-![SQLite](https://img.shields.io/badge/SQLite-Database-003B57?style=flat-square&logo=sqlite)
-![Novu](https://img.shields.io/badge/Novu-Notifications-4f46e5?style=flat-square)
+## Démonstrations
 
----
+| Environnement | Lien | Contenu |
+| :--- | :--- | :--- |
+| Hugging Face (statique) | https://ysfmo98-carewatch.static.hf.space | Caméra, vision, rPPG, rapport PDF |
+| GitHub Pages (statique) | https://cortexllms.github.io/CareWatch/ | Même build, hébergement de secours |
+| Local (complet) | `http://localhost:5173` | Frontend + API + SQLite + notifications |
 
-## ✨ Features
+Les deux démonstrations statiques exécutent l'intégralité du traitement dans le
+navigateur, sans serveur. Le dépôt complet ajoute la persistance SQLite et les
+notifications Novu et Telegram.
 
-- 📹 **Real-time Webcam Analysis** — rPPG heart rate (POS algorithm), stress, fatigue detection (MediaPipe FaceMesh)
-- 🦴 **Skeleton vision overlay** — live body (pose 33 pts), hands (21 pts ×2) and face mesh drawn on the video, with **pain grimace** scoring (brow drop + nose wrinkle + mouth tension)
-- ✋ **Emergency gesture** — raise an **open palm toward the camera for ~1 s** → critical alert fired (Novu In-App + Telegram), red banner + pulsing palm ring
-- 📱 **Mobile ready** — responsive dashboard (portrait camera frame keeps body + raised hand in view) — works on any phone browser over HTTPS
-- 🌍 **Trilingual UI** — Arabic (RTL), French, English with instant in-chat re-translation
-- 🌓 **Light & Dark modes** — CareWatch blue/cyan branding, persisted per user
-- 📲 **Multichannel alerts** — Novu Cloud (In-App Inbox) + **direct Telegram alerts** on critical anomalies
-- 🤖 **AI Chatbot (Med·Check)** — onboarding assistant with graceful regex fallback
-- 📊 **6 Health Metrics** — Stress, Fatigue, Heart Rate, SpO₂, Blink rate, Yawn level + HRV (RMSSD/SDNN)
-- 🗄️ **Persistent Storage** — SQLite database + localStorage (demo works fully offline)
+## Fonctions
 
----
+- **Fréquence cardiaque (rPPG)** — algorithme POS (Wang et al., 2017), filtre
+  passe-bande Butterworth 0,7–4 Hz, estimation spectrale avec interpolation
+  parabolique. La confiance affichée est le rapport signal/bruit spectral
+  mesuré, jamais une constante.
+- **Variabilité cardiaque** — RMSSD, SDNN et ratio LF/HF, calculés côté serveur
+  (NeuroKit2) avec repli local sur les intervalles inter-battements.
+- **Vision du corps et des mains** — squelette MediaPipe Pose (33 points) et
+  Hands (21 points par main), superposé au flux vidéo.
+- **Geste d'urgence** — paume ouverte face caméra maintenue 450 ms : alerte
+  critique, bannière rouge, alarme sonore et notification. La géométrie est
+  calculée en 3D pour rester fiable lorsque la paume fait face à l'objectif.
+- **Visage** — maillage facial, ratio d'ouverture des yeux (EAR), PERCLOS,
+  bâillements (MAR normalisé) et grimace de douleur.
+- **Rapport mensuel PDF** — compte rendu de laboratoire avec synthèse des
+  constantes, détail quotidien, alertes, empreinte SHA-256 et références OMS.
+- **Alertes multicanal** — Novu (in-app, e-mail) et Telegram, avec anti-spam
+  de 15 secondes par type.
+- **Interface trilingue** — français, anglais, arabe (RTL), thèmes clair et
+  sombre, mise en page responsive.
 
-## 🏗️ Architecture
+## Architecture
 
 ```
-┌─────────────────────────────────────────────────┐
-│                   FRONTEND                       │
-│  React 19 + Vite 8 (localhost:5173)             │
-│                                                  │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐      │
-│  │  Camera   │  │  Gauges  │  │ Med·Check│      │
-│  │  rPPG     │  │  SVG     │  │ Chatbot  │      │
-│  └────┬─────┘  └──────────┘  └────┬─────┘      │
-│       │                            │             │
-│       ▼                            ▼             │
-│  Canvas API              Claude API (Anthropic)  │
-│  getUserMedia()          Resend API (Email)      │
-└───────┬─────────────────────────────────────────┘
-        │ axios (HTTP)
-        ▼
-┌─────────────────────────────────────────────────┐
-│                   BACKEND                        │
-│  Node.js + Express (localhost:5000)             │
-│                                                  │
-│  7 REST Endpoints                               │
-│  ┌──────────────────────────────┐               │
-│  │ POST /api/session/start      │               │
-│  │ POST /api/metrics/save       │               │
-│  │ POST /api/alerts/save        │               │
-│  │ GET  /api/session/:id/history│               │
-│  │ GET  /api/session/:id/alerts │               │
-│  │ POST /api/session/:id/end    │               │
-│  │ GET  /api/health             │               │
-│  └──────────────┬───────────────┘               │
-│                 │                                │
-│                 ▼                                │
-│  ┌──────────────────────────────┐               │
-│  │  SQLite (health.db)          │               │
-│  │  Tables: sessions, metrics,  │               │
-│  │          alerts              │               │
-│  └──────────────────────────────┘               │
-└─────────────────────────────────────────────────┘
+frontend/   React 18 + Vite, MediaPipe Tasks Vision, jsPDF
+backend/    Node.js + Express, SQLite, Novu, Telegram
+docs/       Guide utilisateur, guide ingénieur, intégration Novu
 ```
 
----
+Le frontend peut fonctionner seul (mode statique). Lorsqu'il est servi par le
+backend, les deux partagent la même origine : les appels passent par `/api`,
+sans CORS ni configuration supplémentaire.
 
-## 🚀 Quick Start
+## Démarrage rapide
 
-### Prerequisites
-- Node.js v18+
-- npm
+Prérequis : Node.js 22 ou supérieur.
 
-### 1. Clone the repo
 ```bash
-git clone https://github.com/YOUR_USERNAME/CareWatch.git
+git clone https://github.com/CortexLLMs/CareWatch.git
 cd CareWatch
-```
 
-### 2. Install & run Backend
-```bash
+# Backend
 cd backend
 npm install
-node server.js
-# ✓ CareWatch Backend running on http://localhost:5000
-```
+cp .env.example .env        # renseigner les clés (facultatif)
+npm start                   # http://localhost:5000
 
-### 3. Install & run Frontend (new terminal)
-```bash
+# Frontend (second terminal)
 cd frontend
 npm install
-npm run dev
-# ✓ http://localhost:5173
+npm run dev                 # http://localhost:5173
 ```
 
-### 4. Open in browser
-Go to `http://localhost:5173` → Landing page with chatbot appears!
+Variables du backend : `NOVU_API_URL`, `NOVU_API_KEY`, `NOVU_WORKFLOW`,
+`NOVU_SUBSCRIBER`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`. Sans clés,
+l'application reste utilisable et les alertes sont uniquement locales.
 
----
+## Documentation
 
-## 📦 Tech Stack
+- [Guide utilisateur](docs/GUIDE_UTILISATEUR.md) — prise en main, lecture des
+  mesures, rapport mensuel, dépannage.
+- [Guide ingénieur](docs/GUIDE_INGENIEUR.md) — pipeline rPPG, vision, modèle
+  de données, seuils d'alerte, validation, déploiement, formules et références.
+- [Intégration Novu](docs/novu-carewatch.md) — workflow et canaux.
 
-### Frontend
-| Package | Version | Purpose |
-|---------|---------|---------|
-| react | 19.2.6 | UI framework (hooks: useState, useEffect, useRef, useCallback) |
-| react-dom | 19.2.6 | DOM rendering |
-| axios | 1.16.1 | HTTP client for backend API calls |
-| recharts | 3.8.1 | Data visualization charts |
-| vite | 8.0.12 | Dev server + build tool |
+## Données et confidentialité
 
-### Backend
-| Package | Version | Purpose |
-|---------|---------|---------|
-| express | 4.18.2 | REST API server (7 endpoints) |
-| cors | 2.8.5 | Cross-origin requests (frontend ↔ backend) |
-| sqlite3 | 5.1.6 | SQLite database driver |
+Les images de la caméra ne quittent jamais l'appareil : elles sont traitées
+dans le navigateur et ne sont pas transmises. Les mesures agrégées sont
+stockées dans le navigateur pour la démonstration statique, ou dans une base
+SQLite locale lorsque le backend est utilisé. Le rapport PDF est généré
+localement.
 
-### External APIs
-| API | Purpose |
-|-----|---------|
-| Claude API (Anthropic) | AI chatbot for Med·Check medication assistant |
-| Resend API | Email delivery for medication reminders |
-| Novu (self-hosted) | Multi-channel alerting (Telegram, e-mail, in-app) for physiological alerts |
+## Limites
 
-### Browser APIs (native, no install)
-| API | Purpose |
-|-----|---------|
-| getUserMedia() | Webcam access |
-| Canvas getImageData() | Pixel-level face analysis |
-| requestAnimationFrame() | 30fps real-time analysis loop |
-| localStorage | Persist Med·Check user data |
+CareWatch n'est pas un dispositif médical. Les valeurs sont des estimations
+expérimentales destinées à la démonstration et à la recherche. La SpO2 par
+caméra n'est pas calibrée cliniquement. Aucun diagnostic ne doit être fondé
+sur ces mesures.
 
----
+## Équipe
 
-## 🧠 AI & ML Models
+Équipe 5 · HACK4BLADI · Casablanca · 2026.
 
-All analysis runs **client-side in the browser** using pure JavaScript — no external ML libraries.
+## Licence
 
-| Metric | Method | Formula |
-|--------|--------|---------|
-| **Heart Rate** | rPPG (green channel peak detection) | HR = peaks × 12 (5s buffer) |
-| **Stress** | Frame-to-frame motion analysis | stress = avgMotion × 3.5 + HR factor |
-| **Fatigue** | Facial brightness analysis | fatigue = max(0, 100 - brightness × 0.35) |
-| **Anxiety** | Stress derivative | anxiety = stress × 0.7 + random(0-5) |
-| **Burnout** | Stress + fatigue composite | burnout = stress × 0.5 + fatigue × 0.5 |
-| **SpO₂** | Red/green channel ratio | SpO₂ = 88 + (green - red + 50) / 5 |
-
-**Scientific basis:** IEEE Trans. Biomedical Engineering (2019), Maslach Burnout Inventory
-
----
-
-## 🗄️ Database Schema
-
-SQLite database (`health.db`) — auto-created on first run.
-
-### sessions
-| Column | Type | Description |
-|--------|------|-------------|
-| id | INTEGER | Primary key |
-| sessionId | TEXT | Unique session identifier |
-| startTime | DATETIME | Session start |
-| endTime | DATETIME | Session end |
-| status | TEXT | active / ended |
-
-### metrics
-| Column | Type | Description |
-|--------|------|-------------|
-| id | INTEGER | Primary key |
-| sessionId | TEXT | FK → sessions |
-| timestamp | DATETIME | Measurement time |
-| stress | REAL | 0.0 – 1.0 |
-| fatigue | REAL | 0.0 – 1.0 |
-| anxiety | REAL | 0.0 – 1.0 |
-| burnout | REAL | 0.0 – 1.0 |
-| heartRate | INTEGER | BPM |
-| oxygen | REAL | SpO₂ % |
-| brightness | REAL | Face luminosity |
-| motion | REAL | Movement level |
-
-### alerts
-| Column | Type | Description |
-|--------|------|-------------|
-| id | INTEGER | Primary key |
-| sessionId | TEXT | FK → sessions |
-| alertType | TEXT | stress/fatigue/anxiety/burnout/spo2/heartRate |
-| severity | TEXT | critical/high/medium |
-| message | TEXT | Alert description |
-
----
-
-## 📁 Project Structure
-
-```
-CareWatch/
-├── frontend/
-│   ├── src/
-│   │   ├── App.jsx          ← Main React component (all UI + analysis)
-│   │   └── main.jsx         ← React entry point
-│   ├── index.html
-│   ├── package.json
-│   ├── vite.config.js
-│   └── eslint.config.js
-│
-├── backend/
-│   ├── server.js            ← Express API server
-│   ├── health.db            ← SQLite database (auto-created)
-│   └── package.json
-│
-├── .gitignore
-├── LICENSE
-└── README.md
-```
-
----
-
-## ⚙️ Configuration
-
-Edit `frontend/src/App.jsx` lines 5-7:
-
-```javascript
-const RESEND_KEY = "re_YOUR_API_KEY";     // Get from resend.com (free)
-const FROM_EMAIL = "onboarding@resend.dev"; // Or your custom domain
-const FROM_NAME = "CareWatch";
-```
-
----
-
-## 🔔 Notifications multicanal (Novu)
-
-Alertes et rappels peuvent être routés vers **Telegram**, l'**e-mail** ou l'**in-app** via
-[Novu](https://github.com/novuhq/novu) auto-hébergé.
-
-### Backend — configuration
-
-```bash
-cd backend
-cp .env.example .env      # puis renseigner NOVU_API_KEY
-npm start                 # node --env-file-if-exists=.env server.js
-```
-
-```ini
-NOVU_API_URL=http://localhost:3000   # API Novu (dashboard : http://localhost:4000)
-NOVU_API_KEY=novu_v1_xxxxxxxxxxxx     # Settings → API keys
-NOVU_WORKFLOW=alerte-carewatch        # workflow créé dans le dashboard
-NOVU_SUBSCRIBER=carewatch-user
-NOVU_MOCK=0                           # 1 = simulation, sans appel réseau
-```
-
-### Novu en local (Docker)
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/novuhq/novu/next/docker/community/setup.sh | bash
-# ou : git clone https://github.com/novuhq/novu.git && cd novu/docker/community && cp .env.example .env && docker compose up -d
-```
-
-Puis, dans le dashboard (http://localhost:4000) : créer le workflow `alerte-carewatch`,
-connecter un canal (Telegram d'abord, c'est le plus rapide et le plus fiable), et créer la clé API.
-
-### Endpoints CareWatch
-
-| Méthode | Route | Rôle |
-|---------|-------|------|
-| `GET` | `/api/novu/status` | État du service, workflow, joignabilité, liste des workflows |
-| `POST` | `/api/novu/test` | Notification de test (Telegram / e-mail) |
-| `POST` | `/api/novu/notify` | Déclenchement générique d'un événement |
-
-Les alertes `high` et `critical` déclenchent automatiquement une notification Novu
-(asynchrone, non bloquant) ; le canal est tracé dans `alerts.notified_channels`.
-
-Guide complet : [`docs/novu-carewatch.md`](docs/novu-carewatch.md).
-
----
-
-## 🚨 Alert Thresholds
-
-| Metric | Threshold | Severity | Recommendation |
-|--------|-----------|----------|----------------|
-| Stress | > 70% | Critical | 4-7-8 breathing, music |
-| Fatigue | > 75% | High | 15-min break, walk |
-| Anxiety | > 65% | Medium | Meditation, call friend |
-| Burnout | > 70% | Critical | Stop, see professional |
-| SpO₂ | < 92% | Critical | EMERGENCY — call help |
-| Heart Rate | > 105 bpm | High | Breathe slowly, sit |
-
----
-
-## 🌐 Live demo (GitHub Pages)
-
-The frontend is automatically deployed on every push to `main`:
-**https://cortexllms.github.io/CareWatch/**
-
-Works on **desktop and phone** (HTTPS required for camera access — GitHub Pages provides it).
-On the hosted demo, backend features (SQLite history, Novu, Telegram) are disabled —
-the app runs in **offline demo mode**: onboarding chat, webcam rPPG, metrics,
-HRV (local fallback), alerts, trilingual UI and both themes all work in the browser.
-
-**Skeleton & gestures** (camera session required):
-
-| Signal | What it does |
-|---|---|
-| 🦴 Body + hands + face | Skeleton drawn live over the video (MediaPipe Pose + Hands + FaceLandmarker) |
-| Grimace metric | Brow drop + nose wrinkle + mouth tension → pain-grimace score, red face frame + alert |
-| ✋ Emergency gesture | Open palm raised toward the camera ~1 s → `critical` alert → Novu + Telegram (30 s cooldown) |
-
----
-
-## ⚙️ Environment configuration (optional)
-
-Frontend (`frontend/.env`, build-time) :
-
-| Variable | Rôle | Défaut |
-|---|---|---|
-| `VITE_API_URL` | URL du backend Express | `http://localhost:5000` |
-| `VITE_RESEND_KEY` | E-mails de rappel envoyés depuis le navigateur | aucun (désactivé) |
-| `VITE_ANTHROPIC_KEY` | Extraction IA du chatbot | aucun (repli regex) |
-
-Backend (`backend/.env`) : voir `backend/.env.example`
-(`NOVU_*` pour les notifications Novu, `TELEGRAM_*` pour les alertes Telegram sur anomalie,
-`RESEND_KEY` pour `POST /api/send-reminder`). Détails dans [`docs/novu-carewatch.md`](docs/novu-carewatch.md).
-
----
-
-## 🤝 Team
-
-**MYTHON · Oujda · 2026**
-
----
-
-## 📄 License
-
-MIT License — see [LICENSE](LICENSE) for details.
-
----
-
-## ⚠️ Disclaimer
-
-CareWatch is designed for **wellness monitoring and research purposes only**. It is NOT a medical device. Always consult healthcare professionals for medical advice. rPPG accuracy is ±5-10 bpm under optimal lighting.
+MIT. Voir [LICENSE](LICENSE).
