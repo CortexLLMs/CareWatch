@@ -19,15 +19,21 @@ export async function initFaceLandmarker() {
   if (initPromise) return initPromise;
   initPromise = (async () => {
     const vision = await FilesetResolver.forVisionTasks(WASM_URL);
-    landmarker = await FaceLandmarker.createFromOptions(vision, {
-      baseOptions: { modelAssetPath: MODEL_URL, delegate: "GPU" },
+    const opts = (delegate) => ({
+      baseOptions: { modelAssetPath: MODEL_URL, delegate },
       runningMode: "VIDEO",
       numFaces: 1,
       outputFaceBlendshapes: false,
       outputFacialTransformationMatrixes: false,
     });
+    try {
+      landmarker = await FaceLandmarker.createFromOptions(vision, opts("GPU"));
+    } catch {
+      // Certains navigateurs mobiles refusent le délégué GPU : repli CPU.
+      landmarker = await FaceLandmarker.createFromOptions(vision, opts("CPU"));
+    }
     return landmarker;
-  })();
+  })().catch((e) => { initPromise = null; throw e; });
   return initPromise;
 }
 

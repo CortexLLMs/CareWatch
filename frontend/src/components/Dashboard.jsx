@@ -26,10 +26,11 @@ import {
   checkBackend, startSession as apiStartSession, endSession as apiEndSession,
   saveMetrics as apiSaveMetrics, saveAlert as apiSaveAlert, saveSelfReport
 } from "../lib/api";
-import { posSignal, bandpass, estimateHR, detectPeaks } from "../lib/rppg";
+import { posSignal, bandpass, estimateHR, detectPeaks, estimateFps, estimateSpO2 } from "../lib/rppg";
 import { initFaceLandmarker, detect, sampleSkinROI, ear, mar, PerclosBuffer } from "../lib/face";
 import { initBodyLandmarkers, detectPose, detectHands, drawOverlay } from "../lib/body";
 import { isOpenPalm, palmCenter, GrimaceTracker } from "../lib/gestures";
+import { initAlarm, playEmergencyAlarm } from "../lib/alarm";
 import { computeHRV, localHRV } from "../lib/hrv";
 import { useT } from "../i18n.jsx";
 
@@ -41,9 +42,16 @@ const POSE_MS = 55;             // cadence détection corps (~18 Hz)
 const HANDS_MS = 70;            // cadence détection mains (~14 Hz)
 const EMERGENCY_COOLDOWN_MS = 30000; // cooldown du geste d'urgence
 const EMERGENCY_SHOW_MS = 10000;     // durée d'affichage de la bannière
+const PALM_HOLD_MS = 450;            // maintien requis de la paume ouverte
+const PALM_GRACE_MS = 350;           // tolérance entre deux détections
 const ALERT_POST_MS = 15000;         // anti-spam envoi alerte Novu/Telegram
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+const median = (a) => {
+  const s = [...a].sort((x, y) => x - y);
+  const mid = s.length >> 1;
+  return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+};
 
 export default function Dashboard({ medData, onMedUpdate, onReset }) {
   const { t, locale, lang, theme, toggleTheme, cycleLang } = useT();
@@ -85,6 +93,7 @@ export default function Dashboard({ medData, onMedUpdate, onReset }) {
   const ppgBuf = useRef([]);
   const perclos = useRef(new PerclosBuffer(60, FS, 0.20));
   const lastHRV = useRef(0);
+  const hrHist = useRef([]);           // 5 dernières estimations HR (lissage médian)
   const sessSecs = useRef(0);
   const [, force] = useState(0);
 
@@ -92,9 +101,13 @@ export default function Dashboard({ medData, onMedUpdate, onReset }) {
   const poseBuf = useRef(null);          // { lm, at } — dernier squelette corps
   const handsBuf = useRef(null);         // { lm, at } — dernières mains
   const lastPoseAt = useRef(0), lastHandsAt = useRef(0);
-  const palmHold = useRef(0);            // frames consécutives avec paume ouverte
+  const palmHold = useRef(0);            // paume ouverte (0/1) avec tolérance
   const palmC = useRef(null);            // centre de paume (coordonnées 0..1)
+  const palmSince = useRef(null);        // début du maintien de la paume
+  const palmSeenAt = useRef(-Infinity);  // dernière détection de paume
   const emergencyAt = useRef(-Infinity); // timestamp du dernier déclenchement
+  const yawnLevel = useRef(0);           // niveau de bâillement lissé (0..100)
+  const yawnBase = useRef(null);         // ouverture de bouche au repos (adaptatif)
   const grimaceTrk = useRef(new GrimaceTracker());
   const gestureRef = useRef({ palm: false, grimace: false });
   const alertPostAt = useRef({});        // anti-spam Novu/Telegram par type
@@ -124,8 +137,9 @@ export default function Dashboard({ medData, onMedUpdate, onReset }) {
   /* ─── Start / Stop ─── */
   const startSession = useCallback(async () => {
     try {
-      const sid = await apiStartSession(/Mobi/.test(navigator.userAgent) ? "mobile" : "pc", FS);
-      setSessId(sid);
+      // Débloque l'audio d'urgence sur ce geste utilisateur (politique mobile).
+      initAlarm();
+      // La caméra s'ouvre immédiatement : l'API ne doit jamais la bloquer.
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: "user", frameRate: { ideal: 30 } }
       });
@@ -135,12 +149,17 @@ export default function Dashboard({ medData, onMedUpdate, onReset }) {
       }
       rgbBuf.current = { r: [], g: [], b: [], t: [] };
       ppgBuf.current = [];
+      hrHist.current = [];
       perclos.current.reset();
       lastHRV.current = 0;
       poseBuf.current = null;
       handsBuf.current = null;
       palmHold.current = 0;
       palmC.current = null;
+      palmSince.current = null;
+      palmSeenAt.current = -Infinity;
+      yawnLevel.current = 0;
+      yawnBase.current = null;
       lastPoseAt.current = 0;
       lastHandsAt.current = 0;
       grimaceTrk.current.reset();
@@ -150,6 +169,10 @@ export default function Dashboard({ medData, onMedUpdate, onReset }) {
       setGesture({ palm: false, grimace: false });
       gestureRef.current = { palm: false, grimace: false };
       setRunning(true);
+
+      // Identifiant de session en arrière-plan (backend si joignable, sinon local).
+      const sid = await apiStartSession(/Mobi/.test(navigator.userAgent) ? "mobile" : "pc", FS);
+      setSessId(sid);
     } catch (err) {
       alert(tRef.current("dash.startErr") + (err.response?.data?.error || err.message || err));
     }
@@ -159,6 +182,9 @@ export default function Dashboard({ medData, onMedUpdate, onReset }) {
     videoRef.current?.srcObject?.getTracks().forEach((t) => t.stop());
     if (sessId) await apiEndSession(sessId);
     setRunning(false); setSessId(null);
+    palmHold.current = 0; palmSince.current = null; palmC.current = null;
+    setGesture({ palm: false, grimace: false });
+    gestureRef.current = { palm: false, grimace: false };
   }, [sessId]);
 
   /* ─── Main analysis loop ─── */
@@ -186,21 +212,48 @@ export default function Dashboard({ medData, onMedUpdate, onReset }) {
       }
       if (bodyReady && tMs - lastHandsAt.current > HANDS_MS) {
         lastHandsAt.current = tMs;
-        const hs = detectHands(v, tMs);
-        if (hs) handsBuf.current = { lm: hs, at: tMs };
-        const open = hs ? hs.find((h) => isOpenPalm(h)) : null;
+        const det = detectHands(v, tMs);
+        if (det) handsBuf.current = { lm: det.hands, at: tMs };
+
+        let open = null;
+        if (det) {
+          for (let i = 0; i < det.hands.length; i++) {
+            if (isOpenPalm(det.hands[i], det.world?.[i])) { open = det.hands[i]; break; }
+          }
+        }
+
+        // Maintien temporel avec tolérance : les détections de main sont
+        // intermittentes, un simple comptage de frames ne déclenchait jamais.
         if (open) {
-          palmHold.current++;
+          palmSeenAt.current = tMs;
+          if (!palmSince.current) palmSince.current = tMs;
+          palmHold.current = 1;
           palmC.current = palmCenter(open);
-          // 🚨 Geste d'urgence : paume ouverte levée maintenue (~0,3 s),
-          //    cooldown 30 s entre deux déclenchements.
-          if (palmHold.current >= 4 && tMs - emergencyAt.current > EMERGENCY_COOLDOWN_MS) {
+
+          if (tMs - palmSince.current >= PALM_HOLD_MS &&
+              tMs - emergencyAt.current > EMERGENCY_COOLDOWN_MS) {
             emergencyAt.current = tMs;
+            palmSince.current = null;
             setEmergency(true);
             setTimeout(() => setEmergency(false), EMERGENCY_SHOW_MS);
+            playEmergencyAlarm();
+
+            // Envoi immédiat (ne dépend pas du cycle rPPG de 500 ms).
+            const contact = medData?.contact || "";
+            const notify = {
+              subscriberId: "carewatch-user",
+              ...(contact.includes("@") ? { email: contact } : {}),
+              ...(contact && !contact.includes("@") ? { telegram: contact } : {}),
+            };
+            alertPostAt.current["emergency"] = Date.now();
+            apiSaveAlert(sessId, {
+              type: "emergency", severity: "critical",
+              message: tRef.current("alerts.lbl.emergency"),
+            }, notify);
           }
-        } else {
+        } else if (tMs - palmSeenAt.current > PALM_GRACE_MS) {
           palmHold.current = 0;
+          palmSince.current = null;
           palmC.current = null;
         }
       }
@@ -246,6 +299,19 @@ export default function Dashboard({ medData, onMedUpdate, onReset }) {
         }
       }
 
+      // ─── Bâillement : ouverture de bouche normalisée, calculée en continu ───
+      // Indépendant du tampon rPPG : l'affichage ne doit pas rester à zéro si
+      // le visage est détecté mais que le signal cardiaque est encore court.
+      if (marVal != null) {
+        const base = yawnBase.current ?? marVal;
+        const floor = Math.max(0.09, base * 1.25);   // ouverture de repos
+        const raw = clamp(((marVal - floor) / 0.36) * 100, 0, 100);
+        yawnLevel.current = yawnLevel.current * 0.75 + raw * 0.25;
+        if (raw < 25) yawnBase.current = base * 0.98 + marVal * 0.02;
+      } else {
+        yawnLevel.current *= 0.92;
+      }
+
       // PERCLOS
       if (earVal != null) perclos.current.push(earVal);
 
@@ -256,38 +322,50 @@ export default function Dashboard({ medData, onMedUpdate, onReset }) {
       brightness /= full.length / 16;
 
       const now = Date.now();
-      if (now - lastSave > 500 && rgbBuf.current.r.length > FS * 4) {
+      if (now - lastSave > 500) {
         lastSave = now;
 
-        // ─── 1. POS → bandpass → HR ───
-        const pos = posSignal(rgbBuf.current.r, rgbBuf.current.g, rgbBuf.current.b, FS);
-        const bp = bandpass(pos, FS);
-        ppgBuf.current = Array.from(bp);
-        const hrRes = estimateHR(bp, FS);
-        const hr = hrRes ? hrRes.hr : 0;
-        const confidence = hrRes ? hrRes.confidence : 0;
+        const hasSignal = rgbBuf.current.r.length > FS * 4;
+        let fsNow = FS, bp = null, hr = 0, confidence = 0, oxygen = 0, oxygenConf = 0;
 
-        // ─── 2. SpO₂ estimate (RGB-only, low confidence) ───
-        const mR = rgbBuf.current.r.reduce((a, b) => a + b, 0) / rgbBuf.current.r.length;
-        const mG = rgbBuf.current.g.reduce((a, b) => a + b, 0) / rgbBuf.current.g.length;
-        const oxygen = clamp(88 + (mG - mR + 50) / 5, 88, 100);
+        if (hasSignal) {
+          // ─── 1. POS → bandpass → HR (cadence réelle mesurée) ───
+          fsNow = estimateFps(rgbBuf.current.t, FS);
+          const pos = posSignal(rgbBuf.current.r, rgbBuf.current.g, rgbBuf.current.b, fsNow);
+          bp = bandpass(pos, fsNow);
+          ppgBuf.current = Array.from(bp);
+          const hrRes = estimateHR(bp, fsNow);
+          confidence = hrRes ? hrRes.confidence : 0;
 
-        // ─── 3. PERCLOS → drowsiness % ───
+          // Lissage médian sur 5 estimations (stabilité d'affichage)
+          if (hrRes && hrRes.hr > 0 && confidence > 0.15) {
+            hrHist.current.push(hrRes.hr);
+            if (hrHist.current.length > 5) hrHist.current.shift();
+          }
+          hr = hrHist.current.length ? Math.round(median(hrHist.current)) : 0;
+
+          // ─── 2. SpO₂ par ratio-of-ratios (expérimental, confiance dédiée) ───
+          const spo2 = estimateSpO2(rgbBuf.current.r, rgbBuf.current.g, fsNow);
+          oxygen = spo2.value != null ? spo2.value : 0;
+          oxygenConf = spo2.confidence || 0;
+        }
+
+        // ─── 3. PERCLOS → somnolence ; bâillement calculé en continu ───
         const p = perclos.current.perclos();
         const drowsiness = Math.round(clamp(p * 100 * 3, 0, 100));   // PERCLOS > 15% → drowsy
         const blinkRate = perclos.current.blinkRate();
-        const yawnLevel = marVal ? Math.round(clamp((marVal - 0.4) * 200, 0, 100)) : 0;
+        const yawnPct = Math.round(clamp(yawnLevel.current, 0, 100));
 
         // ─── 4. HRV via backend (every 15s) ───
         let hrvMetrics = null;
-        if (now - lastHRV.current > HRV_INTERVAL_MS && ppgBuf.current.length >= FS * 8) {
+        if (bp && now - lastHRV.current > HRV_INTERVAL_MS && ppgBuf.current.length >= fsNow * 8) {
           lastHRV.current = now;
           if (backendOk) {
-            hrvMetrics = await computeHRV(ppgBuf.current, FS);
+            hrvMetrics = await computeHRV(ppgBuf.current, fsNow);
           }
           if (!hrvMetrics) {
             // Local fallback
-            const { ibi } = detectPeaks(bp, FS);
+            const { ibi } = detectPeaks(bp, fsNow);
             hrvMetrics = localHRV(ibi);
           }
         }
@@ -304,14 +382,15 @@ export default function Dashboard({ medData, onMedUpdate, onReset }) {
           const next = {
             ...prev,
             heartRate: hr || prev.heartRate,
-            oxygen: Math.round(oxygen),
+            oxygen: oxygen || prev.oxygen,
+            oxygenConfidence: oxygen ? Math.round(oxygenConf * 100) : prev.oxygenConfidence,
             drowsiness,
             blinkRate: Math.round(blinkRate),
-            yawnLevel,
+            yawnLevel: yawnPct,
             grimace: g.score,
             brightness: Math.round(brightness),
             motion: 0,
-            confidence: Math.round(confidence * 100),
+            confidence: confidence ? Math.round(confidence * 100) : prev.confidence,
             // If HRV not yet computed, use preliminary HR-based estimate.
             // If we already had an HRV-based arousal value, keep it.
             arousal: prev.rmssd > 0 ? prev.arousal : Math.round(prelimStress),
@@ -326,20 +405,26 @@ export default function Dashboard({ medData, onMedUpdate, onReset }) {
         });
 
         // ─── 5. Save to backend ───
-        apiSaveMetrics(sessId, {
-          heartRate: hr, oxygen, drowsiness, arousal: hrvMetrics?.arousal,
-          rmssd: hrvMetrics?.rmssd, sdnn: hrvMetrics?.sdnn, lfhf: hrvMetrics?.lfhf,
-          blinkRate, yawnLevel, brightness, confidence
-        });
+        if (hasSignal) {
+          apiSaveMetrics(sessId, {
+            heartRate: hr, oxygen, drowsiness, arousal: hrvMetrics?.arousal,
+            rmssd: hrvMetrics?.rmssd, sdnn: hrvMetrics?.sdnn, lfhf: hrvMetrics?.lfhf,
+            blinkRate, yawnLevel: yawnPct, brightness, confidence
+          });
+        }
 
         // ─── 6. Alerts ───
         const triggers = [];
-        if (hr > 110)        triggers.push({ type: "heartRate", severity: "high", label: tRef.current("alerts.lbl.elevatedHR") });
-        if (hr > 0 && hr < 50) triggers.push({ type: "heartRate", severity: "high", label: tRef.current("alerts.lbl.lowHR") });
+        // Les alertes cardiaques et SpO2 exigent un signal exploitable :
+        // sans cette garde, le bruit rPPG déclenchait des alertes en continu.
+        const hrOk = hr > 0 && confidence > 0.3 && hrHist.current.length >= 3;
+        if (hrOk && hr > 110)        triggers.push({ type: "heartRate", severity: "high", label: tRef.current("alerts.lbl.elevatedHR") });
+        if (hrOk && hr < 50)         triggers.push({ type: "heartRate", severity: "high", label: tRef.current("alerts.lbl.lowHR") });
         if (drowsiness > 60) triggers.push({ type: "fatigue",   severity: "high",     label: tRef.current("alerts.lbl.drowsy") });
         if (drowsiness > 80) triggers.push({ type: "fatigue",   severity: "critical", label: tRef.current("alerts.lbl.criticalDrowsy") });
         if (hrvMetrics?.arousal > 75) triggers.push({ type: "stress", severity: "high", label: tRef.current("alerts.lbl.arousal") });
-        if (oxygen < 92)     triggers.push({ type: "oxygen",    severity: "critical", label: tRef.current("alerts.lbl.lowSpo2") });
+        if (oxygen > 0 && oxygen < 92 && oxygenConf > 0.5)
+          triggers.push({ type: "oxygen", severity: "critical", label: tRef.current("alerts.lbl.lowSpo2") });
         // Geste d'urgence : paume ouverte levée vers la caméra
         if (tMs - emergencyAt.current < EMERGENCY_SHOW_MS)
           triggers.push({ type: "emergency", severity: "critical", label: tRef.current("alerts.lbl.emergency") });

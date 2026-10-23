@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import sqlite3 from 'sqlite3';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { registerHRVRoutes } from './routes_hrv.js';
 import { registerEmailRoutes } from './routes_email.js';
@@ -18,7 +19,7 @@ process.on('unhandledRejection', (e) =>
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
-const PORT = 5000;
+const PORT = Number(process.env.PORT) || 5000;
 
 app.use(cors());
 app.use(express.json());
@@ -32,6 +33,10 @@ const db = new sqlite3.Database(path.join(__dirname, 'health.db'), (err) => {
 // Événement 'error' de sqlite3 : sans écouteur, Node tuerait le process.
 db.on('error', (err) => console.error('DB error event (le serveur continue) :', err));
 
+// La création du schéma est enveloppée dans une fonction pour pouvoir la lancer
+// APRÈS la migration : l'ordre des opérations asynchrones de sqlite3 n'est pas
+// garanti lorsque la migration (db.get + callback) est imbriquée dans db.serialize.
+function initSchema() {
 db.serialize(() => {
   db.run('PRAGMA foreign_keys = ON');
   db.run('PRAGMA journal_mode = WAL');
@@ -108,7 +113,7 @@ db.serialize(() => {
       session_id          TEXT REFERENCES sessions(id),
       metric_id           INTEGER REFERENCES health_metrics(id),
       triggered_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
-      alert_type          TEXT CHECK(alert_type IN ('stress','fatigue','anxiety','burnout','heart_rate','spo2','emergency')),
+      alert_type          TEXT CHECK(alert_type IN ('stress','fatigue','anxiety','burnout','heart_rate','spo2','emergency','grimace')),
       severity            TEXT CHECK(severity IN ('low','medium','high','critical')),
       threshold_exceeded  REAL,
       notified_channels   TEXT DEFAULT '[]',
@@ -256,6 +261,46 @@ db.serialize(() => {
      'Combined HRV + facial tension model')
   `);
 });
+}
+
+// ─── MIGRATION (v3.1) ────────────────────────────────────────────────────────
+// Ajoute le type d'alerte 'grimace' au CHECK de alerts.alert_type.
+// Exécutée AVANT initSchema(), avec un ordre strictement séquentiel.
+(function migrateAlerts() {
+  db.get("SELECT sql FROM sqlite_master WHERE type='table' AND name='alerts'", (err, row) => {
+    if (err || !row) { initSchema(); return; }            // base neuve
+    if (row.sql.includes("'grimace'")) { initSchema(); return; } // déjà migrée
+
+    console.log('→ Migration : ajout du type grimace dans alerts.alert_type');
+    db.serialize(() => {
+      db.run('PRAGMA legacy_alter_table = ON');
+      db.run('DROP INDEX IF EXISTS idx_alerts_session');
+      db.run('DROP TABLE IF EXISTS alerts_old');
+      db.run('ALTER TABLE alerts RENAME TO alerts_old');
+      db.run('PRAGMA legacy_alter_table = OFF');
+      db.run(`
+        CREATE TABLE alerts (
+          id                  TEXT PRIMARY KEY,
+          session_id          TEXT REFERENCES sessions(id),
+          metric_id           INTEGER REFERENCES health_metrics(id),
+          triggered_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
+          alert_type          TEXT CHECK(alert_type IN ('stress','fatigue','anxiety','burnout','heart_rate','spo2','emergency','grimace')),
+          severity            TEXT CHECK(severity IN ('low','medium','high','critical')),
+          threshold_exceeded  REAL,
+          notified_channels   TEXT DEFAULT '[]',
+          acknowledged_at     DATETIME,
+          message             TEXT
+        )
+      `);
+      db.run('INSERT INTO alerts SELECT * FROM alerts_old');
+      db.run('DROP TABLE alerts_old');
+      db.run('CREATE INDEX IF NOT EXISTS idx_alerts_session ON alerts(session_id)', () => {
+        console.log('✓ Migration terminée (type grimace disponible)');
+      });
+    });
+    initSchema();
+  });
+})();
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
 
@@ -655,6 +700,20 @@ app.get('/api/users/:userId/stats', async (req, res) => {
 registerHRVRoutes(app, { db, run, get, all, uid });
 registerEmailRoutes(app);                            // ⭐ ADD THIS LINE
 registerNovuRoutes(app);                           // Notifications multicanal (Telegram, e-mail, in-app)
+
+// ─── FRONTEND STATIQUE (déploiement monolithique : Hugging Face Spaces) ──────
+// En production mono-origine, le backend sert la build Vite : la caméra et
+// l'API partagent le même domaine HTTPS (pas de CORS, pas de localhost).
+const FRONTEND_DIST = path.join(__dirname, '..', 'frontend', 'dist');
+if (fs.existsSync(path.join(FRONTEND_DIST, 'index.html'))) {
+  app.use(express.static(FRONTEND_DIST));
+  // Fallback SPA : toute route non-API renvoie index.html
+  app.get(/^(?!\/api).*/, (_req, res) => res.sendFile(path.join(FRONTEND_DIST, 'index.html')));
+  console.log('✓ Frontend statique servi depuis frontend/dist');
+} else {
+  console.log('⚠ frontend/dist absent — mode API seule (développement local)');
+}
+
 app.listen(PORT, () => {
   console.log(`\n🏥 IA HEALTH Advanced Backend — http://localhost:${PORT}`);
   console.log('   Tables: users, consents, sessions, health_metrics, alerts,');

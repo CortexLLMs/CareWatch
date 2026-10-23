@@ -4,34 +4,56 @@
 // soit le modèle de landmarks (FaceMesh 478 pts, Pose 33 pts, Hands 21 pts).
 
 export const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+const dist3 = (a, b) => Math.hypot(a.x - b.x, a.y - b.y, (a.z || 0) - (b.z || 0));
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 
-/* ─── Paume ouverte levée (geste d'urgence) ───────────────────────────────
-   Une main compte comme "paume ouverte vers la caméra" quand :
-   1. au moins 4 des 5 doigts sont tendus
-      (la pointe est nettement plus loin du poignet que la 2e phalange) ;
-   2. la paume est suffisamment grande dans l'image (main levée proche
-      de la caméra — longueur poignet→base du majeur ≥ 9 % du cadre).
-   Les landmarks MediaPipe sont normalisés (0..1) : le rapport est donc
-   directement comparable quelle que soit la résolution de la caméra.
+/* ─── Paume ouverte face caméra (geste d'urgence) ─────────────────────────
+   Le test 2D « la pointe du doigt est plus loin du poignet que la phalange »
+   échoue précisément quand la paume fait face à la caméra : les doigts
+   pointent vers l'objectif et se projettent près du poignet. On utilise donc
+   les landmarks 3D (worldLandmarks, en mètres) fournis par MediaPipe :
+   1. au moins 4 des 5 doigts tendus, mesurés en 3D ;
+   2. paume suffisamment grande dans l'image (main levée, proche) ;
+   3. normale de la paume orientée vers la caméra (si les points 3D existent).
 
-   Retourne true/false — l'enchaînement "maintenu N frames" est géré
-   par l'appelant (Dashboard) pour éviter les déclenchements accidentels. */
-export function isOpenPalm(hand, minPalmRatio = 0.09) {
+   `hand`  : 21 landmarks normalisés (0..1), pour la taille apparente.
+   `world` : 21 landmarks métriques (optionnel) pour l'extension des doigts.
+   Retourne un booléen ; le maintien temporel est géré par l'appelant. */
+export function isOpenPalm(hand, world = null, minPalmRatio = 0.055) {
   if (!hand || hand.length < 21) return false;
-  const w = hand[0];
-  const extended = (tip, pip) => dist(hand[tip], w) > dist(hand[pip], w) * 1.12;
+  const src = world && world.length >= 21 ? world : null;
+
+  const d = src ? dist3 : (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+  const pts = src || hand;
+  const wrist = pts[0];
+
+  const extended = (tip, pip) => d(pts[tip], wrist) > d(pts[pip], wrist) * 1.06;
   const fingers = [
     extended(8, 6),    // index
     extended(12, 10),  // majeur
     extended(16, 14),  // annulaire
     extended(20, 18),  // auriculaire
   ];
-  const thumb = dist(hand[4], hand[5]) > dist(hand[3], hand[5]) * 1.10;
+  const thumb = d(pts[4], pts[5]) > d(pts[3], pts[5]) * 1.05;
   const count = fingers.filter(Boolean).length + (thumb ? 1 : 0);
   if (count < 4) return false;
-  const palm = dist(hand[0], hand[9]); // poignet → base du majeur (0..1)
-  return palm >= minPalmRatio;
+
+  // Taille apparente : longueur ou largeur de paume (invariante à l'orientation).
+  const palmLen = dist(hand[0], hand[9]);
+  const palmWid = dist(hand[5], hand[17]);
+  if (Math.max(palmLen, palmWid * 0.8) < minPalmRatio) return false;
+
+  // Orientation : la normale de la paume doit viser la caméra.
+  if (src) {
+    const v1 = { x: src[17].x - src[5].x, y: src[17].y - src[5].y, z: (src[17].z || 0) - (src[5].z || 0) };
+    const v2 = { x: src[9].x - src[0].x, y: src[9].y - src[0].y, z: (src[9].z || 0) - (src[0].z || 0) };
+    const nx = v1.y * v2.z - v1.z * v2.y;
+    const ny = v1.z * v2.x - v1.x * v2.z;
+    const nz = v1.x * v2.y - v1.y * v2.x;
+    const norm = Math.hypot(nx, ny, nz);
+    if (norm > 1e-9 && Math.abs(nz) / norm < 0.25) return false;
+  }
+  return true;
 }
 
 /* ─── Centre approximatif de la paume (pour l'anneau d'alerte) ─── */

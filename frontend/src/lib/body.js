@@ -21,25 +21,36 @@ export async function initBodyLandmarkers() {
   if (initPromise) return initPromise;
   initPromise = (async () => {
     const vision = await FilesetResolver.forVisionTasks(WASM_URL);
-    const [p, h] = await Promise.all([
-      PoseLandmarker.createFromOptions(vision, {
-        baseOptions: { modelAssetPath: POSE_URL, delegate: "GPU" },
-        runningMode: "VIDEO",
-        numPoses: 1,
-        minPoseDetectionConfidence: 0.5,
-        minPosePresenceConfidence: 0.5,
-        minTrackingConfidence: 0.5,
-      }),
-      HandLandmarker.createFromOptions(vision, {
-        baseOptions: { modelAssetPath: HANDS_URL, delegate: "GPU" },
-        runningMode: "VIDEO",
-        numHands: 2,
-        minHandDetectionConfidence: 0.5,
-        minTrackingConfidence: 0.5,
-      }),
+    const poseOpts = (delegate) => ({
+      baseOptions: { modelAssetPath: POSE_URL, delegate },
+      runningMode: "VIDEO",
+      numPoses: 1,
+      minPoseDetectionConfidence: 0.5,
+      minPosePresenceConfidence: 0.5,
+      minTrackingConfidence: 0.5,
+    });
+    const handsOpts = (delegate) => ({
+      baseOptions: { modelAssetPath: HANDS_URL, delegate },
+      runningMode: "VIDEO",
+      numHands: 2,
+      minHandDetectionConfidence: 0.5,
+      minTrackingConfidence: 0.5,
+    });
+
+    const create = async (delegate) => Promise.all([
+      PoseLandmarker.createFromOptions(vision, poseOpts(delegate)),
+      HandLandmarker.createFromOptions(vision, handsOpts(delegate)),
     ]);
-    poseLm = p;
-    handsLm = h;
+
+    let pair;
+    try {
+      pair = await create("GPU");
+    } catch {
+      // Repli CPU si le délégué GPU est indisponible (mobile, pilotes).
+      pair = await create("CPU");
+    }
+    poseLm = pair[0];
+    handsLm = pair[1];
     return true;
   })().catch((e) => { initPromise = null; throw e; });
   return initPromise;
@@ -58,7 +69,8 @@ export function detectHands(video, tMs) {
   if (!handsLm) return null;
   try {
     const r = handsLm.detectForVideo(video, tMs);
-    return r && r.landmarks && r.landmarks.length ? r.landmarks : null;
+    if (!r || !r.landmarks || !r.landmarks.length) return null;
+    return { hands: r.landmarks, world: r.worldLandmarks || null };
   } catch { return null; }
 }
 

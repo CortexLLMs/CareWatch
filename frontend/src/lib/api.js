@@ -9,7 +9,10 @@
 
 import axios from "axios";
 
-export const API = (import.meta.env.VITE_API_URL || "http://localhost:5000") + "/api";
+// En développement, le backend tourne sur localhost:5000.
+// En production (build Vite), frontend et API partagent la même origine
+// (/api) : Hugging Face Space, GitHub Pages ou serveur monolithique.
+export const API = (import.meta.env.VITE_API_URL ?? (import.meta.env.PROD ? "" : "http://localhost:5000")) + "/api";
 
 // ⚠️ Les clés ci-dessous sont injectées à la compilation (build time) via les
 // variables VITE_* ; aucune clé n'est stockée dans le dépôt. En production,
@@ -21,12 +24,22 @@ const FROM_NAME = "CareWatch";
 
 /* ─── Backend health & sessions ──────────────────────────── */
 
+// Un hébergeur statique renvoie index.html en 200 sur les routes inconnues :
+// on valide le corps JSON, sinon la démo hors ligne afficherait « connecté ».
 export const checkBackend = () =>
-  axios.get(`${API}/health`).then(() => true).catch(() => false);
+  axios.get(`${API}/health`, { timeout: 4000 })
+       .then((r) => !!(r.data && r.data.status === "ok"))
+       .catch(() => false);
 
+// Le backend est optionnel : s'il est injoignable (ou si l'hébergeur est
+// statique et renvoie du HTML), la session démarre en mode local et la caméra
+// s'ouvre quand même.
 export const startSession = (deviceType = "pc", fps = 30) =>
-  axios.post(`${API}/session/start`, { device_type: deviceType, camera_fps: fps })
-       .then((r) => r.data.sessionId);
+  axios.post(`${API}/session/start`, { device_type: deviceType, camera_fps: fps }, { timeout: 4000 })
+       .then((r) => (r.data && typeof r.data === "object" && r.data.sessionId)
+         ? r.data.sessionId
+         : `local-${Date.now().toString(36)}`)
+       .catch(() => `local-${Date.now().toString(36)}`);
 
 export const endSession = (sid) =>
   axios.post(`${API}/session/${sid}/end`).catch(() => {});
@@ -39,7 +52,9 @@ export const saveAlert = (sid, alert, notify) =>
 
 // ── Novu : notifications multicanal (Telegram, e-mail, in-app) ──────
 export const novuStatus = () =>
-  axios.get(`${API}/novu/status`).then((r) => r.data).catch(() => null);
+  axios.get(`${API}/novu/status`, { timeout: 4000 })
+       .then((r) => (r.data && typeof r.data === "object" ? r.data : null))
+       .catch(() => null);
 
 export const novuTest = (to) =>
   axios.post(`${API}/novu/test`, to ? { to } : {}).then((r) => r.data).catch((e) => ({ ok: false, error: e.message }));

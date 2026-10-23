@@ -91,7 +91,11 @@ export default function CameraCard({
             background: "rgba(160,10,20,.55)", backdropFilter: "blur(2px)", color: "#fff",
             pointerEvents: "none", padding: 16
           }}>
-            <span style={{ fontSize: 30, lineHeight: 1 }}>🚨</span>
+            <span style={{
+              width: 34, height: 34, borderRadius: "50%", background: "#fff", color: "#a00a14",
+              display: "inline-flex", alignItems: "center", justifyContent: "center",
+              fontSize: 22, fontWeight: 700, lineHeight: 1
+            }}>!</span>
             <span className="mono" style={{ fontSize: 15, fontWeight: 600, letterSpacing: "0.12em", animation: "cw-pulse 1s infinite" }}>
               {t("cam.emergency")}
             </span>
@@ -106,7 +110,9 @@ export default function CameraCard({
           fontSize: 9.5, letterSpacing: "0.06em", color: "var(--fg-dim)", display: "flex",
           alignItems: "center", gap: 8, flexWrap: "wrap"
         }}>
-          <span style={{ color: gesture.palm ? "var(--danger)" : "var(--fg-faint)" }}>✋ → 🚨</span>
+          <span style={{ color: gesture.palm ? "var(--danger)" : "var(--fg-faint)", fontWeight: 600 }}>PAUME</span>
+          <span style={{ color: "var(--fg-faint)" }}>→</span>
+          <span style={{ color: gesture.palm ? "var(--danger)" : "var(--fg-faint)", fontWeight: 600 }}>ALERTE</span>
           <span>{t("cam.gestureHint")}</span>
         </div>
       )}
