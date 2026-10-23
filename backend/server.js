@@ -8,7 +8,13 @@ import { registerEmailRoutes } from './routes_email.js';
 import { registerNovuRoutes, triggerNovu, buildAlertPayload } from './routes_novu.js';
 import { sendTelegramAlert } from './telegram.js';
 
-
+// ─── GARDE-FOUS PROCESSUS ─────────────────────────────────────────────────────
+// Un serveur d'alertes santé NE DOIT JAMAIS mourir à cause d'un bug annexe
+// (erreur SQLite non catchée, promesse rejetée oubliée…) : on logge et on vit.
+process.on('uncaughtException', (e) =>
+  console.error('⚠️ uncaughtException (le serveur continue) :', e?.stack || e));
+process.on('unhandledRejection', (e) =>
+  console.error('⚠️ unhandledRejection (le serveur continue) :', e?.stack || e));
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -23,6 +29,8 @@ const db = new sqlite3.Database(path.join(__dirname, 'health.db'), (err) => {
   if (err) console.error('DB Error:', err);
   else console.log('✓ Database connected');
 });
+// Événement 'error' de sqlite3 : sans écouteur, Node tuerait le process.
+db.on('error', (err) => console.error('DB error event (le serveur continue) :', err));
 
 db.serialize(() => {
   db.run('PRAGMA foreign_keys = ON');
