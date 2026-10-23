@@ -202,6 +202,21 @@ const dict = {
     "rep.empty": "Aucune donnée enregistrée pour ce mois. Lancez une session pour alimenter le rapport.",
     "rep.note": "Document non diagnostique. Les données restent sur cet appareil.",
     "rep.error": "La génération du rapport a échoué.",
+
+    "set.camTitle": "Caméra",
+    "set.camSub": "Choisissez la source vidéo. Pour utiliser votre téléphone comme webcam, installez iVCam sur le PC et sur le téléphone, connectez-les, puis sélectionnez « e2eSoft iVCam ».",
+    "set.camDetect": "Détecter",
+    "set.camScanning": "Recherche…",
+    "set.camDefault": "Caméra par défaut",
+    "set.camMissing": "Caméra mémorisée (indisponible)",
+    "set.camSelected": "Source active :",
+    "set.camVirtual": "caméra virtuelle",
+    "set.camVirtualFound": "Caméra virtuelle détectée :",
+    "set.camDenied": "Accès refusé. Autorisez la caméra dans les réglages du navigateur, puis réessayez.",
+    "set.camNone": "Aucune caméra détectée. Lancez le client iVCam ou autorisez l'accès, puis actualisez.",
+    "set.camSteps": "iVCam : client Windows et application mobile, connectés en Wi-Fi ou en USB.",
+    "set.camHint": "Le choix s'applique au prochain démarrage de session.",
+    "set.camRunning": "Session en cours : arrêtez puis redémarrez pour changer de caméra.",
   },
 
   en: {
@@ -399,6 +414,21 @@ const dict = {
     "rep.empty": "No data recorded for this month. Start a session to populate the report.",
     "rep.note": "Non-diagnostic document. Data stays on this device.",
     "rep.error": "Report generation failed.",
+
+    "set.camTitle": "Camera",
+    "set.camSub": "Choose the video source. To use your phone as a webcam, install iVCam on the PC and on the phone, connect them, then select \"e2eSoft iVCam\".",
+    "set.camDetect": "Detect",
+    "set.camScanning": "Scanning…",
+    "set.camDefault": "Default camera",
+    "set.camMissing": "Saved camera (unavailable)",
+    "set.camSelected": "Active source:",
+    "set.camVirtual": "virtual camera",
+    "set.camVirtualFound": "Virtual camera detected:",
+    "set.camDenied": "Access denied. Allow the camera in browser settings, then try again.",
+    "set.camNone": "No camera detected. Start the iVCam client or grant access, then refresh.",
+    "set.camSteps": "iVCam: Windows client and mobile app, connected over Wi-Fi or USB.",
+    "set.camHint": "The choice applies at the next session start.",
+    "set.camRunning": "Session running: stop and restart to change camera.",
   },
 
   ar: {

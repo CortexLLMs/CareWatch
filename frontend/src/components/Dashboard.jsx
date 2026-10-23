@@ -23,7 +23,9 @@ import {
   IconPlay, IconStop, IconCheck, IconAlert, IconSun, IconMoon
 } from "./Icons";
 import MonthlyReport from "./MonthlyReport";
+import CameraSettings from "./CameraSettings";
 import { recordSample, addSeconds, recordAlert } from "../lib/history";
+import { cameraConstraints, fallbackConstraints, getSavedCameraId } from "../lib/camera";
 import {
   checkBackend, startSession as apiStartSession, endSession as apiEndSession,
   saveMetrics as apiSaveMetrics, saveAlert as apiSaveAlert, saveSelfReport
@@ -156,9 +158,17 @@ export default function Dashboard({ medData, onMedUpdate, onReset }) {
       // Débloque l'audio d'urgence sur ce geste utilisateur (politique mobile).
       initAlarm();
       // La caméra s'ouvre immédiatement : l'API ne doit jamais la bloquer.
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: "user", frameRate: { ideal: 30 } }
-      });
+      // La source mémorisée (iVCam, webcam USB) est prioritaire ; si elle a
+      // disparu, on retombe sur la caméra par défaut sans bloquer la session.
+      const savedCam = getSavedCameraId();
+      let stream = null;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ video: cameraConstraints() });
+      } catch (camErr) {
+        if (!savedCam) throw camErr;
+        console.warn("Caméra mémorisée indisponible, repli sur la caméra par défaut.", camErr);
+        stream = await navigator.mediaDevices.getUserMedia({ video: fallbackConstraints() });
+      }
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
         await videoRef.current.play();
@@ -723,7 +733,10 @@ export default function Dashboard({ medData, onMedUpdate, onReset }) {
             />
             <div id="cw-alerts" style={{ minWidth: 0 }}><AlertsCard alerts={alerts}/></div>
             <div id="cw-meds" style={{ minWidth: 0 }}><MedPanel medData={medData} onUpdate={onMedUpdate}/></div>
-            <div id="cw-settings" style={{ minWidth: 0 }}><NotifyCard contact={medData?.contact}/></div>
+            <div id="cw-settings" style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: 14 }}>
+              <CameraSettings running={running} />
+              <NotifyCard contact={medData?.contact}/>
+            </div>
           </section>
 
           <section style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }}>
