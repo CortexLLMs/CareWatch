@@ -69,7 +69,7 @@ export default function CameraCard({
                 fontSize: 8.5, letterSpacing: "0.1em", padding: "3px 7px", borderRadius: 999,
                 background: "rgba(255,60,70,.85)", color: "#fff", animation: "cw-pulse 1s infinite"
               }}>
-                ✋ {t("cam.palm")}
+                {t("cam.palm")}
               </span>
             )}
             {gesture.grimace && (
@@ -77,7 +77,7 @@ export default function CameraCard({
                 fontSize: 8.5, letterSpacing: "0.1em", padding: "3px 7px", borderRadius: 999,
                 background: "rgba(255,90,104,.85)", color: "#fff"
               }}>
-                ⚠ {t("cam.grimace")}
+                {t("cam.grimace")}
               </span>
             )}
           </div>
