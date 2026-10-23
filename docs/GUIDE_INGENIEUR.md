@@ -71,6 +71,12 @@ $$
 
 avec repli à 30 Hz lorsque l'échantillon est trop court.
 
+La source vidéo est sélectionnable. `camera.js` mémorise l'identifiant du
+périphérique et construit une contrainte `deviceId: { exact }`, ce qui permet
+d'utiliser une caméra virtuelle iVCam alimentée par un téléphone. Si la
+source a disparu, `getUserMedia` échoue en `OverconstrainedError` et la
+session bascule sur la caméra par défaut sans interruption.
+
 ### 3.2 Plane-Orthogonal-to-Skin (POS)
 
 Sur une fenêtre glissante $T_w = 1{,}6$ s, on normalise chaque canal par sa

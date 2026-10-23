@@ -42,6 +42,25 @@ encore fiable.
 
 Pour arrêter, appuyez sur **Arrêter**. La session est alors enregistrée.
 
+### Utiliser son téléphone comme caméra (iVCam)
+
+Si l'ordinateur n'a pas de caméra, ou si celle du téléphone est meilleure :
+
+1. Installez le client **iVCam** sur le PC depuis
+   https://www.e2esoft.com/ivcam/ et l'application **iVCam** sur le téléphone
+   (App Store ou Google Play).
+2. Connectez les deux appareils au même réseau Wi-Fi, ou branchez le
+   téléphone en USB.
+3. Lancez le client sur le PC, puis l'application sur le téléphone : la
+   connexion est automatique.
+4. Dans CareWatch, ouvrez la section **Réglages**, carte **Caméra**.
+5. Appuyez sur **Détecter**, puis choisissez **e2eSoft iVCam**.
+6. Démarrez la session. Le choix est mémorisé pour les fois suivantes.
+
+L'application affiche « caméra virtuelle » lorsqu'elle reconnaît iVCam. Si
+la source mémorisée n'est plus disponible, elle revient automatiquement à la
+caméra par défaut.
+
 ## 4. Lire le tableau de bord
 
 | Indicateur | Signification | Comment le lire |
@@ -133,6 +152,12 @@ La mesure peut demander jusqu'à dix secondes.
 **Le geste de la paume ne déclenche rien.** Présentez la paume bien ouverte,
 doigts écartés, à 40–70 cm, et maintenez-la. Évitez le profil ou le dos de la
 main.
+
+**iVCam n'apparaît pas dans la liste des caméras.** Vérifiez que le client
+iVCam est lancé sur le PC et que le téléphone est connecté. Fermez puis
+rouvrez le navigateur après l'installation du pilote, autorisez la caméra,
+puis appuyez de nouveau sur **Détecter**. La caméra doit apparaître sous le
+nom « e2eSoft iVCam ».
 
 **Le rapport est vide.** Aucune session n'a été enregistrée pour ce mois.
 Lancez une session de quelques minutes, puis rouvrez la carte.

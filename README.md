@@ -35,6 +35,9 @@ notifications Novu et Telegram.
   calculée en 3D pour rester fiable lorsque la paume fait face à l'objectif.
 - **Visage** — maillage facial, ratio d'ouverture des yeux (EAR), PERCLOS,
   bâillements (MAR normalisé) et grimace de douleur.
+- **Choix de la source vidéo** — webcam intégrée, caméra USB ou caméra
+  virtuelle iVCam alimentée par un téléphone. Le choix est mémorisé et un
+  repli automatique évite de bloquer la session si la source disparaît.
 - **Rapport mensuel PDF** — compte rendu de laboratoire avec synthèse des
   constantes, détail quotidien, alertes, empreinte SHA-256 et références OMS.
 - **Alertes multicanal** — Novu (in-app, e-mail) et Telegram, avec anti-spam
