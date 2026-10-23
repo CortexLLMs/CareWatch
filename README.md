@@ -18,6 +18,9 @@
 ## ✨ Features
 
 - 📹 **Real-time Webcam Analysis** — rPPG heart rate (POS algorithm), stress, fatigue detection (MediaPipe FaceMesh)
+- 🦴 **Skeleton vision overlay** — live body (pose 33 pts), hands (21 pts ×2) and face mesh drawn on the video, with **pain grimace** scoring (brow drop + nose wrinkle + mouth tension)
+- ✋ **Emergency gesture** — raise an **open palm toward the camera for ~1 s** → critical alert fired (Novu In-App + Telegram), red banner + pulsing palm ring
+- 📱 **Mobile ready** — responsive dashboard (portrait camera frame keeps body + raised hand in view) — works on any phone browser over HTTPS
 - 🌍 **Trilingual UI** — Arabic (RTL), French, English with instant in-chat re-translation
 - 🌓 **Light & Dark modes** — CareWatch blue/cyan branding, persisted per user
 - 📲 **Multichannel alerts** — Novu Cloud (In-App Inbox) + **direct Telegram alerts** on critical anomalies
@@ -296,9 +299,18 @@ Guide complet : [`docs/novu-carewatch.md`](docs/novu-carewatch.md).
 The frontend is automatically deployed on every push to `main`:
 **https://cortexllms.github.io/CareWatch/**
 
+Works on **desktop and phone** (HTTPS required for camera access — GitHub Pages provides it).
 On the hosted demo, backend features (SQLite history, Novu, Telegram) are disabled —
 the app runs in **offline demo mode**: onboarding chat, webcam rPPG, metrics,
 HRV (local fallback), alerts, trilingual UI and both themes all work in the browser.
+
+**Skeleton & gestures** (camera session required):
+
+| Signal | What it does |
+|---|---|
+| 🦴 Body + hands + face | Skeleton drawn live over the video (MediaPipe Pose + Hands + FaceLandmarker) |
+| Grimace metric | Brow drop + nose wrinkle + mouth tension → pain-grimace score, red face frame + alert |
+| ✋ Emergency gesture | Open palm raised toward the camera ~1 s → `critical` alert → Novu + Telegram (30 s cooldown) |
 
 ---
 

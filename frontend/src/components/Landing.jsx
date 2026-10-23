@@ -162,8 +162,8 @@ export default function Landing({ onDone }) {
         </div>
       </header>
 
-      <main style={{ position: "relative", flex: 1, display: "grid", gridTemplateColumns: "minmax(280px, 360px) 1fr" }}>
-        <aside style={{ borderRight: "1px solid var(--line)", padding: "48px 32px", display: "flex", flexDirection: "column", gap: 32 }}>
+      <main className="cw-land" style={{ position: "relative", flex: 1, display: "grid", gridTemplateColumns: "minmax(280px, 360px) 1fr" }}>
+        <aside className="cw-land-aside" style={{ borderRight: "1px solid var(--line)", padding: "48px 32px", display: "flex", flexDirection: "column", gap: 32 }}>
           <img src={LOGO_FULL} alt="CareWatch" style={{ width: 168, alignSelf: "flex-start" }}/>
           <div>
             <div className="mono" style={{ fontSize: 11, letterSpacing: "0.12em", color: "var(--fg-dim)", textTransform: "uppercase", marginBottom: 12 }}>{t("land.onboarding")}</div>

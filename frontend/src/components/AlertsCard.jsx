@@ -9,6 +9,8 @@ const REC = {
   burnout: "rec.burnout",
   oxygen: "rec.oxygen",
   heartRate: "rec.heartRate",
+  emergency: "rec.emergency",
+  grimace: "rec.grimace",
 };
 
 export default function AlertsCard({ alerts }) {

@@ -27,7 +27,7 @@ export default function Sidebar({ active, onNav, profile, onReset, alerts }) {
   };
 
   return (
-    <aside style={{
+    <aside className="cw-side" style={{
       width: 220, flexShrink: 0, borderRight: "1px solid var(--line)",
       display: "flex", flexDirection: "column", background: "var(--bg-0)"
     }}>

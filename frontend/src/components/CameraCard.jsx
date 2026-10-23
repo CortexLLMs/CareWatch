@@ -2,12 +2,16 @@
 import { IconCamera, IconPlay, IconStop } from "./Icons";
 import { useT } from "../i18n.jsx";
 
-export default function CameraCard({ running, onStart, onStop, videoRef, canvasRef, backendOk }) {
+export default function CameraCard({
+  running, onStart, onStop, videoRef, canvasRef, overlayRef,
+  backendOk, bodyReady, gesture = {}, emergency = false,
+}) {
   const { t } = useT();
   return (
     <div style={{
-      background: "var(--bg-1)", border: "1px solid var(--line)", borderRadius: "var(--r-lg)",
-      overflow: "hidden", display: "flex", flexDirection: "column"
+      background: "var(--bg-1)", border: "1px solid " + (emergency ? "var(--danger)" : "var(--line)"),
+      borderRadius: "var(--r-lg)", overflow: "hidden", display: "flex", flexDirection: "column",
+      transition: "border-color .3s"
     }}>
       <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--line)", display: "flex", alignItems: "center", gap: 8 }}>
         <span style={{ color: "var(--fg-mute)" }}><IconCamera size={14}/></span>
@@ -19,7 +23,8 @@ export default function CameraCard({ running, onStart, onStop, videoRef, canvasR
           </span>
         )}
       </div>
-      <div style={{ position: "relative", aspectRatio: "16 / 9", background: "var(--bg-3)" }}>
+
+      <div className="cw-cam" style={{ position: "relative", background: "var(--bg-3)" }}>
         {!running && (
           <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 12, color: "var(--fg-mute)" }}>
             <span style={{
@@ -33,7 +38,10 @@ export default function CameraCard({ running, onStart, onStop, videoRef, canvasR
           </div>
         )}
         <video ref={videoRef} autoPlay playsInline muted style={{ width: "100%", height: "100%", objectFit: "cover", display: running ? "block" : "none" }}/>
+        {/* Squelette : corps · mains · visage (dessiné chaque frame) */}
+        <canvas ref={overlayRef} className="cw-overlay"/>
         <canvas ref={canvasRef} style={{ display: "none" }}/>
+
         {running && (
           <div style={{ position: "absolute", top: 12, left: 12, right: 12, bottom: 12, pointerEvents: "none" }}>
             {[{ t: 0, l: 0 }, { t: 0, r: 0 }, { b: 0, l: 0 }, { b: 0, r: 0 }].map((p, i) => (
@@ -45,7 +53,64 @@ export default function CameraCard({ running, onStart, onStop, videoRef, canvasR
             ))}
           </div>
         )}
+
+        {/* Puces d'état : squelette + gestes détectés */}
+        {running && (
+          <div style={{ position: "absolute", top: 10, left: 10, display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-start" }}>
+            <span className="mono" style={{
+              fontSize: 8.5, letterSpacing: "0.1em", padding: "3px 7px", borderRadius: 999,
+              background: "rgba(0,0,0,.55)", color: bodyReady ? "#7cf0ff" : "#ffd27a",
+              border: "1px solid rgba(255,255,255,.15)"
+            }}>
+              {bodyReady ? t("cam.overlay") : t("cam.modelsLoad")}
+            </span>
+            {gesture.palm && (
+              <span className="mono cw-chip-alert" style={{
+                fontSize: 8.5, letterSpacing: "0.1em", padding: "3px 7px", borderRadius: 999,
+                background: "rgba(255,60,70,.85)", color: "#fff", animation: "cw-pulse 1s infinite"
+              }}>
+                ✋ {t("cam.palm")}
+              </span>
+            )}
+            {gesture.grimace && (
+              <span className="mono" style={{
+                fontSize: 8.5, letterSpacing: "0.1em", padding: "3px 7px", borderRadius: 999,
+                background: "rgba(255,90,104,.85)", color: "#fff"
+              }}>
+                ⚠ {t("cam.grimace")}
+              </span>
+            )}
+          </div>
+        )}
+
+        {/* Bannière d'urgence : paume ouverte levée */}
+        {running && emergency && (
+          <div className="cw-emergency" style={{
+            position: "absolute", inset: 0, display: "flex", flexDirection: "column",
+            alignItems: "center", justifyContent: "center", gap: 6, textAlign: "center",
+            background: "rgba(160,10,20,.55)", backdropFilter: "blur(2px)", color: "#fff",
+            pointerEvents: "none", padding: 16
+          }}>
+            <span style={{ fontSize: 30, lineHeight: 1 }}>🚨</span>
+            <span className="mono" style={{ fontSize: 15, fontWeight: 600, letterSpacing: "0.12em", animation: "cw-pulse 1s infinite" }}>
+              {t("cam.emergency")}
+            </span>
+            <span style={{ fontSize: 12, opacity: 0.95, maxWidth: 320 }}>{t("cam.emergencySub")}</span>
+          </div>
+        )}
       </div>
+
+      {running && (
+        <div className="mono" style={{
+          padding: "7px 14px", borderBottom: "1px solid var(--line)",
+          fontSize: 9.5, letterSpacing: "0.06em", color: "var(--fg-dim)", display: "flex",
+          alignItems: "center", gap: 8, flexWrap: "wrap"
+        }}>
+          <span style={{ color: gesture.palm ? "var(--danger)" : "var(--fg-faint)" }}>✋ → 🚨</span>
+          <span>{t("cam.gestureHint")}</span>
+        </div>
+      )}
+
       <div style={{ padding: "10px 14px", display: "flex", gap: 8, alignItems: "center", borderTop: "1px solid var(--line)" }}>
         <button onClick={running ? onStop : onStart} style={{
           padding: "7px 12px", borderRadius: "var(--r-sm)",

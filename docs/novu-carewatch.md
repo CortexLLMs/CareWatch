@@ -43,6 +43,16 @@ envoi **non bloquant** ; si le jeton est absent, l'envoi est ignoré silencieuse
 aux canaux de l'alerte en base. Vérification : `POST /api/novu/test` (Novu) puis enregistrer
 une alerte `critical` (Telegram) et lire le log serveur (`✓ Telegram notifié (…)`).
 
+**Nouveaux déclencheurs depuis la caméra (frontend) :**
+
+| Type | Sévérité | Déclencheur | Canal |
+|---|---|---|---|
+| `emergency` | `critical` | **Geste d'urgence** : paume ouverte levée vers la caméra ~1 s (cooldown 30 s) | Novu + Telegram |
+| `grimace` | `high` | **Grimace douloureuse maintenue** (sourcils baissés + lèvre haute remontée + bouche tendue ≥ 60 % pendant ~0,2 s) | Novu + Telegram |
+
+Le frontend limite les envois à **1 notification par type toutes les 15 s** (anti-spam),
+l'affichage dans *Alertes actives* reste instantané et disparaît dès que le signal retombe.
+
 ---
 
 ## 2. Déployer Novu en local (procédure officielle)

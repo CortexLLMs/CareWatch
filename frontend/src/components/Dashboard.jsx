@@ -20,7 +20,7 @@ import Disclaimer from "./Disclaimer";
 import SelfReport from "./SelfReport";
 import {
   IconHeart, IconLung, IconBrain, IconFlame, IconSparkle, IconShield,
-  IconPlay, IconStop, IconCheck
+  IconPlay, IconStop, IconCheck, IconAlert
 } from "./Icons";
 import {
   checkBackend, startSession as apiStartSession, endSession as apiEndSession,
@@ -28,6 +28,8 @@ import {
 } from "../lib/api";
 import { posSignal, bandpass, estimateHR, detectPeaks } from "../lib/rppg";
 import { initFaceLandmarker, detect, sampleSkinROI, ear, mar, PerclosBuffer } from "../lib/face";
+import { initBodyLandmarkers, detectPose, detectHands, drawOverlay } from "../lib/body";
+import { isOpenPalm, palmCenter, GrimaceTracker } from "../lib/gestures";
 import { computeHRV, localHRV } from "../lib/hrv";
 import { useT } from "../i18n.jsx";
 
@@ -35,11 +37,16 @@ const FS = 30;                  // expected sample rate
 const RPPG_WIN_SEC = 10;        // PPG analysis window
 const HRV_INTERVAL_MS = 15000;  // recompute HRV every 15s
 const HIST_LEN = 30;
+const POSE_MS = 55;             // cadence détection corps (~18 Hz)
+const HANDS_MS = 70;            // cadence détection mains (~14 Hz)
+const EMERGENCY_COOLDOWN_MS = 30000; // cooldown du geste d'urgence
+const EMERGENCY_SHOW_MS = 10000;     // durée d'affichage de la bannière
+const ALERT_POST_MS = 15000;         // anti-spam envoi alerte Novu/Telegram
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 
 export default function Dashboard({ medData, onMedUpdate, onReset }) {
-  const { t, locale, lang } = useT();
+  const { t, locale, lang, theme, toggleTheme, cycleLang } = useT();
   const tRef = useRef(t);
   tRef.current = t;
   const [active, setActive] = useState("dash");
@@ -48,6 +55,9 @@ export default function Dashboard({ medData, onMedUpdate, onReset }) {
   const [sessId, setSessId] = useState(null);
   const [backendOk, setBackendOk] = useState(null);
   const [faceReady, setFaceReady] = useState(false);
+  const [bodyReady, setBodyReady] = useState(false);
+  const [emergency, setEmergency] = useState(false);
+  const [gesture, setGesture] = useState({ palm: false, grimace: false });
   const [selfReportOpen, setSelfReportOpen] = useState(false);
   const [selfReport, setSelfReport] = useState(null);
 
@@ -58,6 +68,7 @@ export default function Dashboard({ medData, onMedUpdate, onReset }) {
     drowsiness: 0,        // from PERCLOS
     blinkRate: 0,         // blinks/min
     yawnLevel: 0,         // MAR
+    grimace: 0,           // expression de douleur (sourcils + lèvres)
     brightness: 0,
     motion: 0,
     rmssd: 0, sdnn: 0, lfhf: 0,
@@ -65,17 +76,28 @@ export default function Dashboard({ medData, onMedUpdate, onReset }) {
   });
 
   const [history, setHistory] = useState({
-    heartRate: [], arousal: [], drowsiness: [], oxygen: []
+    heartRate: [], arousal: [], drowsiness: [], oxygen: [], grimace: []
   });
   const [alerts, setAlerts] = useState([]);
 
-  const videoRef = useRef(null), canvasRef = useRef(null);
+  const videoRef = useRef(null), canvasRef = useRef(null), overlayRef = useRef(null);
   const rgbBuf = useRef({ r: [], g: [], b: [], t: [] });
   const ppgBuf = useRef([]);
   const perclos = useRef(new PerclosBuffer(60, FS, 0.20));
   const lastHRV = useRef(0);
   const sessSecs = useRef(0);
   const [, force] = useState(0);
+
+  // ─── Vision corps / mains / gestes ───
+  const poseBuf = useRef(null);          // { lm, at } — dernier squelette corps
+  const handsBuf = useRef(null);         // { lm, at } — dernières mains
+  const lastPoseAt = useRef(0), lastHandsAt = useRef(0);
+  const palmHold = useRef(0);            // frames consécutives avec paume ouverte
+  const palmC = useRef(null);            // centre de paume (coordonnées 0..1)
+  const emergencyAt = useRef(-Infinity); // timestamp du dernier déclenchement
+  const grimaceTrk = useRef(new GrimaceTracker());
+  const gestureRef = useRef({ palm: false, grimace: false });
+  const alertPostAt = useRef({});        // anti-spam Novu/Telegram par type
 
   /* ─── Clock + backend check + face init ─── */
   useEffect(() => {
@@ -87,6 +109,10 @@ export default function Dashboard({ medData, onMedUpdate, onReset }) {
     initFaceLandmarker()
       .then(() => setFaceReady(true))
       .catch((e) => { console.error("FaceLandmarker init failed", e); setFaceReady(false); });
+    // Squelette corps + mains — échec non bloquant (CDN indisponible, etc.)
+    initBodyLandmarkers()
+      .then(() => setBodyReady(true))
+      .catch((e) => { console.warn("Pose/Hands init failed (overlay désactivé)", e); setBodyReady(false); });
   }, []);
 
   useEffect(() => {
@@ -111,6 +137,18 @@ export default function Dashboard({ medData, onMedUpdate, onReset }) {
       ppgBuf.current = [];
       perclos.current.reset();
       lastHRV.current = 0;
+      poseBuf.current = null;
+      handsBuf.current = null;
+      palmHold.current = 0;
+      palmC.current = null;
+      lastPoseAt.current = 0;
+      lastHandsAt.current = 0;
+      grimaceTrk.current.reset();
+      alertPostAt.current = {};
+      emergencyAt.current = -Infinity;
+      setEmergency(false);
+      setGesture({ palm: false, grimace: false });
+      gestureRef.current = { palm: false, grimace: false };
       setRunning(true);
     } catch (err) {
       alert(tRef.current("dash.startErr") + (err.response?.data?.error || err.message || err));
@@ -139,6 +177,43 @@ export default function Dashboard({ medData, onMedUpdate, onReset }) {
 
       const tMs = performance.now();
       const landmarks = faceReady ? detect(v, tMs) : null;
+
+      /* ─── Squelette corps + mains (détections cadencées) ─── */
+      if (bodyReady && tMs - lastPoseAt.current > POSE_MS) {
+        lastPoseAt.current = tMs;
+        const p = detectPose(v, tMs);
+        if (p) poseBuf.current = { lm: p, at: tMs };
+      }
+      if (bodyReady && tMs - lastHandsAt.current > HANDS_MS) {
+        lastHandsAt.current = tMs;
+        const hs = detectHands(v, tMs);
+        if (hs) handsBuf.current = { lm: hs, at: tMs };
+        const open = hs ? hs.find((h) => isOpenPalm(h)) : null;
+        if (open) {
+          palmHold.current++;
+          palmC.current = palmCenter(open);
+          // 🚨 Geste d'urgence : paume ouverte levée maintenue (~0,3 s),
+          //    cooldown 30 s entre deux déclenchements.
+          if (palmHold.current >= 4 && tMs - emergencyAt.current > EMERGENCY_COOLDOWN_MS) {
+            emergencyAt.current = tMs;
+            setEmergency(true);
+            setTimeout(() => setEmergency(false), EMERGENCY_SHOW_MS);
+          }
+        } else {
+          palmHold.current = 0;
+          palmC.current = null;
+        }
+      }
+
+      /* ─── Grimace (expression de douleur) ─── */
+      const g = grimaceTrk.current.push(landmarks, tMs);
+
+      // Synchronisation des puces d'état (uniquement si changement)
+      const gestNow = { palm: palmHold.current > 0, grimace: g.active };
+      if (gestNow.palm !== gestureRef.current.palm || gestNow.grimace !== gestureRef.current.grimace) {
+        gestureRef.current = gestNow;
+        setGesture(gestNow);
+      }
 
       let rgb = null;
       let earVal = null;
@@ -233,6 +308,7 @@ export default function Dashboard({ medData, onMedUpdate, onReset }) {
             drowsiness,
             blinkRate: Math.round(blinkRate),
             yawnLevel,
+            grimace: g.score,
             brightness: Math.round(brightness),
             motion: 0,
             confidence: Math.round(confidence * 100),
@@ -264,21 +340,61 @@ export default function Dashboard({ medData, onMedUpdate, onReset }) {
         if (drowsiness > 80) triggers.push({ type: "fatigue",   severity: "critical", label: tRef.current("alerts.lbl.criticalDrowsy") });
         if (hrvMetrics?.arousal > 75) triggers.push({ type: "stress", severity: "high", label: tRef.current("alerts.lbl.arousal") });
         if (oxygen < 92)     triggers.push({ type: "oxygen",    severity: "critical", label: tRef.current("alerts.lbl.lowSpo2") });
+        // Geste d'urgence : paume ouverte levée vers la caméra
+        if (tMs - emergencyAt.current < EMERGENCY_SHOW_MS)
+          triggers.push({ type: "emergency", severity: "critical", label: tRef.current("alerts.lbl.emergency") });
+        // Grimace douloureuse maintenue
+        if (g.active)
+          triggers.push({ type: "grimace", severity: "high", label: tRef.current("alerts.lbl.grimace") });
         const contact = medData?.contact || "";
         const notify = {
           subscriberId: "carewatch-user",
           ...(contact.includes("@") ? { email: contact } : {}),
           ...(contact && !contact.includes("@") ? { telegram: contact } : {}),
         };
-        triggers.forEach((t) => apiSaveAlert(sessId, { type: t.type, severity: t.severity, message: t.label }, notify));
+        // Anti-spam : 1 envoi Novu/Telegram maximum par type toutes les 15 s
+        triggers.forEach((tr) => {
+          const last = alertPostAt.current[tr.type] || 0;
+          if (now - last < ALERT_POST_MS) return;
+          alertPostAt.current[tr.type] = now;
+          apiSaveAlert(sessId, { type: tr.type, severity: tr.severity, message: tr.label }, notify);
+        });
         setAlerts(triggers);
+      }
+
+      /* ─── Superposition du squelette (corps · mains · visage) ─── */
+      const ov = overlayRef.current;
+      if (ov) {
+        const CW = ov.clientWidth, CH = ov.clientHeight;
+        if (CW > 0 && CH > 0) {
+          if (ov.width !== CW) ov.width = CW;
+          if (ov.height !== CH) ov.height = CH;
+          const octx = ov.getContext("2d");
+          const vw = v.videoWidth || 640, vh = v.videoHeight || 480;
+          // Même recadrage object-fit:cover que la balise <video>
+          const sc = Math.max(CW / vw, CH / vh);
+          const ox = (CW - vw * sc) / 2, oy = (CH - vh * sc) / 2;
+          const map = (lm) => ({ x: ox + lm.x * vw * sc, y: oy + lm.y * vh * sc });
+          const fresh = (b) => (b && tMs - b.at < 800 ? b.lm : null);
+          drawOverlay(octx, {
+            W: CW, H: CH, map,
+            face: landmarks,
+            pose: fresh(poseBuf),
+            hands: fresh(handsBuf),
+            grimaceScore: g.score,
+            palm: palmHold.current > 0,
+            palmCenter: palmC.current,
+            emergency: tMs - emergencyAt.current < EMERGENCY_SHOW_MS,
+            tMs,
+          });
+        }
       }
 
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(raf);
-  }, [running, sessId, faceReady, backendOk]);
+  }, [running, sessId, faceReady, bodyReady, backendOk]);
 
   /* ─── History buffer ─── */
   useEffect(() => {
@@ -289,9 +405,10 @@ export default function Dashboard({ medData, onMedUpdate, onReset }) {
         arousal:    push(h.arousal,    metrics.arousal),
         drowsiness: push(h.drowsiness, metrics.drowsiness),
         oxygen:     push(h.oxygen,     metrics.oxygen),
+        grimace:    push(h.grimace,    metrics.grimace),
       };
     });
-  }, [metrics.heartRate, metrics.arousal, metrics.drowsiness, metrics.oxygen]);
+  }, [metrics.heartRate, metrics.arousal, metrics.drowsiness, metrics.oxygen, metrics.grimace]);
 
   const sessClock = () => {
     const s = sessSecs.current;
@@ -319,7 +436,7 @@ export default function Dashboard({ medData, onMedUpdate, onReset }) {
       <Sidebar active={active} onNav={setActive} profile={medData} onReset={onReset} alerts={alerts.length}/>
 
       <main style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
-        <header style={{ padding: "14px 28px", borderBottom: "1px solid var(--line)", display: "flex", alignItems: "center", gap: 16 }}>
+        <header className="cw-head" style={{ padding: "14px 28px", borderBottom: "1px solid var(--line)", display: "flex", alignItems: "center", gap: 16 }}>
           <div style={{ display: "flex", flexDirection: "column" }}>
             <h2 style={{ margin: 0, fontSize: 16, fontWeight: 600, letterSpacing: "-0.01em" }}>{t("dash.live")}</h2>
             <span className="mono" style={{ fontSize: 10.5, color: "var(--fg-dim)", letterSpacing: "0.04em", marginTop: 2 }}>
@@ -328,6 +445,22 @@ export default function Dashboard({ medData, onMedUpdate, onReset }) {
             </span>
           </div>
           <div style={{ marginInlineStart: "auto", display: "flex", alignItems: "center", gap: 10 }}>
+            {/* Switchers thème + langue — affichés uniquement sur mobile (sidebar masquée) */}
+            <div className="cw-mob-switch" style={{ display: "none", gap: 6 }}>
+              <button onClick={toggleTheme} title={t(theme === "dark" ? "theme.light" : "theme.dark")} className="mono" style={{
+                border: "1px solid var(--line)", background: "var(--bg-2)", color: "var(--fg-mute)",
+                borderRadius: "var(--r-sm)", padding: "5px 9px", fontSize: 11, cursor: "pointer"
+              }}>{theme === "dark" ? "☀️" : "🌙"}</button>
+              <button onClick={cycleLang} title="FR / EN / AR" className="mono" style={{
+                border: "1px solid var(--line)", background: "var(--bg-2)", color: "var(--fg-mute)",
+                borderRadius: "var(--r-sm)", padding: "5px 9px", fontSize: 11, cursor: "pointer"
+              }}>{lang.toUpperCase()}</button>
+            </div>
+            {bodyReady && running && (
+              <span className="mono" style={{ fontSize: 10, color: "var(--accent-2)", padding: "5px 10px", borderRadius: 999, background: "var(--bg-1)", border: "1px solid var(--line)", letterSpacing: "0.08em" }}>
+                {t("dash.poseReady")}
+              </span>
+            )}
             {faceReady && (
               <span className="mono" style={{ fontSize: 10, color: "var(--accent)", padding: "5px 10px", borderRadius: 999, background: "var(--bg-1)", border: "1px solid var(--line)", letterSpacing: "0.08em" }}>
                 {t("dash.faceReady")}
@@ -355,9 +488,9 @@ export default function Dashboard({ medData, onMedUpdate, onReset }) {
 
         <Disclaimer/>
 
-        <div style={{ padding: 28, display: "flex", flexDirection: "column", gap: 20, overflowY: "auto" }}>
+        <div className="cw-content" style={{ padding: 28, display: "flex", flexDirection: "column", gap: 20, overflowY: "auto" }}>
           {/* Hero */}
-          <section style={{ display: "grid", gridTemplateColumns: "minmax(0, 380px) 1fr", gap: 20 }}>
+          <section className="cw-grid-hero" style={{ display: "grid", gridTemplateColumns: "minmax(0, 380px) 1fr", gap: 20 }}>
             <div style={{ background: "var(--bg-1)", border: "1px solid var(--line)", borderRadius: "var(--r-lg)", padding: 20, position: "relative", overflow: "hidden" }}>
               <div style={{ position: "absolute", inset: 0, background: `radial-gradient(60% 80% at 50% 100%, ${scoreColor}1F, transparent 70%)`, pointerEvents: "none" }}/>
               <div style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
@@ -429,13 +562,14 @@ export default function Dashboard({ medData, onMedUpdate, onReset }) {
           </section>
 
           {/* Metrics */}
-          <section style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14 }}>
+          <section className="cw-grid-metrics" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14 }}>
             <MetricCard Icon={IconFlame}    label={t("mc.stress")}   value={metrics.arousal}    unit="%"   history={history.arousal}    warn={50} danger={70}/>
             <MetricCard Icon={IconSparkle}  label={t("mc.fatigue")}  value={metrics.drowsiness} unit="%"   history={history.drowsiness} warn={40} danger={65}/>
             <MetricCard Icon={IconHeart}    label={t("mc.hr")}       value={Math.round(metrics.heartRate)} unit="bpm" history={history.heartRate} max={140} warn={95} danger={110}/>
             <MetricCard Icon={IconLung}     label={t("mc.spo2")}     value={metrics.oxygen}     unit="%"   history={history.oxygen}    warn={95} danger={92} inverse/>
             <MetricCard Icon={IconBrain}    label={t("mc.blink")}    value={metrics.blinkRate}  unit="/min" history={[]} max={40} warn={25} danger={35}/>
             <MetricCard Icon={IconShield}   label={t("mc.yawn")}     value={metrics.yawnLevel}  unit="%"   history={[]} warn={50} danger={75}/>
+            <MetricCard Icon={IconAlert}    label={t("mc.grimace")}  value={metrics.grimace}    unit="%"   history={history.grimace} warn={50} danger={75}/>
           </section>
 
           {/* Self-report row */}
@@ -467,13 +601,18 @@ export default function Dashboard({ medData, onMedUpdate, onReset }) {
           <StatStrip stats={[
             { label: t("strip.session"),    value: sessId ? sessId.slice(0, 12) : "—" },
             { label: t("strip.faceMesh"),   value: faceReady ? t("strip.tracking") : t("strip.loading"), color: faceReady ? "var(--accent)" : "var(--warn)" },
+            { label: t("strip.body"),       value: bodyReady ? t("strip.bodyOn") : t("strip.loading"), color: bodyReady ? "var(--accent-2)" : "var(--warn)" },
             { label: t("strip.brightness"), value: metrics.brightness + " lx" },
             { label: t("strip.rmssd"),      value: metrics.rmssd ? metrics.rmssd + " ms" : "—" },
             { label: t("strip.backend"),    value: backendOk ? t("strip.connected") : t("strip.offline"), color: backendOk ? "var(--accent)" : "var(--danger)" }
           ]}/>
 
-          <section style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr 1fr", gap: 14 }}>
-            <CameraCard running={running} onStart={startSession} onStop={stopSession} videoRef={videoRef} canvasRef={canvasRef} backendOk={backendOk}/>
+          <section className="cw-grid-bottom" style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr 1fr", gap: 14 }}>
+            <CameraCard
+              running={running} onStart={startSession} onStop={stopSession}
+              videoRef={videoRef} canvasRef={canvasRef} overlayRef={overlayRef}
+              backendOk={backendOk} bodyReady={bodyReady} gesture={gesture} emergency={emergency}
+            />
             <AlertsCard alerts={alerts}/>
             <MedPanel medData={medData} onUpdate={onMedUpdate}/>
             <NotifyCard contact={medData?.contact}/>
@@ -497,7 +636,7 @@ export default function Dashboard({ medData, onMedUpdate, onReset }) {
 
 function StatStrip({ stats }) {
   return (
-    <div style={{
+    <div className="cw-grid-strip" style={{
       display: "grid", gridTemplateColumns: `repeat(${stats.length}, 1fr)`, gap: 1,
       background: "var(--line)", border: "1px solid var(--line)",
       borderRadius: "var(--r-md)", overflow: "hidden"
