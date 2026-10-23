@@ -2,13 +2,13 @@
 import Sparkline from "./Sparkline";
 import { useT } from "../i18n.jsx";
 
-export default function MetricCard({ Icon, label, value, unit, history, max = 100, warn, danger, inverse = false }) {
+export default function MetricCard({ Icon, label, value, unit, history, max = 100, warn, danger, inverse = false, available = true }) {
   const { t } = useT();
-  const status = inverse
+  const status = !available ? "unavailable" : inverse
     ? (value <= danger ? "danger" : value <= warn ? "warn" : "ok")
     : (value >= danger ? "danger" : value >= warn ? "warn" : "ok");
-  const color = status === "danger" ? "var(--danger)" : status === "warn" ? "var(--warn)" : "var(--accent)";
-  const statusLabel = status === "danger" ? t("mc.elevated") : status === "warn" ? t("mc.watch") : t("mc.normal");
+  const color = status === "unavailable" ? "var(--fg-dim)" : status === "danger" ? "var(--danger)" : status === "warn" ? "var(--warn)" : "var(--accent)";
+  const statusLabel = status === "unavailable" ? "—" : status === "danger" ? t("mc.elevated") : status === "warn" ? t("mc.watch") : t("mc.normal");
   return (
     <div style={{
       background: "var(--bg-1)", border: "1px solid var(--line)", borderRadius: "var(--r-lg)",
@@ -27,14 +27,14 @@ export default function MetricCard({ Icon, label, value, unit, history, max = 10
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8 }}>
         <div style={{ display: "flex", alignItems: "baseline", gap: 4 }}>
           <span className="mono tabular" style={{ fontSize: 32, fontWeight: 500, letterSpacing: "-0.02em", color: "var(--fg)", lineHeight: 1 }}>
-            {value}
+            {available ? value : "--"}
           </span>
           <span className="mono" style={{ fontSize: 12, color: "var(--fg-dim)" }}>{unit}</span>
         </div>
         <Sparkline data={history} color={color} width={80} height={28}/>
       </div>
       <div style={{ height: 2, background: "var(--bg-3)", borderRadius: 2, overflow: "hidden" }}>
-        <div style={{ width: Math.min(100, (value / max) * 100) + "%", height: "100%", background: color, transition: "width .4s, background .3s" }}/>
+        <div style={{ width: (available ? Math.min(100, (value / max) * 100) : 0) + "%", height: "100%", background: color, transition: "width .4s, background .3s" }}/>
       </div>
     </div>
   );

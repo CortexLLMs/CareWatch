@@ -303,15 +303,6 @@ export default function Dashboard({ medData, onMedUpdate, onReset }) {
         rgb = sampleSkinROI(landmarks, ctx, c.width, c.height);
         earVal = ear(landmarks);
         marVal = mar(landmarks);
-      } else {
-        // Fallback: sample a fixed center rectangle (degraded)
-        const fw = Math.floor(c.width * 0.3), fh = Math.floor(c.height * 0.15);
-        const fx = Math.floor(c.width * 0.35), fy = Math.floor(c.height * 0.1);
-        const data = ctx.getImageData(fx, fy, fw, fh).data;
-        let R = 0, G = 0, B = 0;
-        for (let i = 0; i < data.length; i += 4) { R += data[i]; G += data[i + 1]; B += data[i + 2]; }
-        const n = data.length / 4;
-        rgb = { r: R / n, g: G / n, b: B / n };
       }
 
       if (rgb) {
@@ -408,16 +399,16 @@ export default function Dashboard({ medData, onMedUpdate, onReset }) {
 
           const next = {
             ...prev,
-            heartRate: hr || prev.heartRate,
-            oxygen: oxygen || prev.oxygen,
-            oxygenConfidence: oxygen ? Math.round(oxygenConf * 100) : prev.oxygenConfidence,
+            heartRate: hr,
+            oxygen,
+            oxygenConfidence: oxygen > 0 ? Math.round(oxygenConf * 100) : 0,
             drowsiness,
             blinkRate: Math.round(blinkRate),
             yawnLevel: yawnPct,
             grimace: g.score,
             brightness: Math.round(brightness),
             motion: 0,
-            confidence: confidence ? Math.round(confidence * 100) : prev.confidence,
+            confidence: Math.round(confidence * 100),
             // If HRV not yet computed, use preliminary HR-based estimate.
             // If we already had an HRV-based arousal value, keep it.
             arousal: prev.rmssd > 0 ? prev.arousal : Math.round(prelimStress),
@@ -662,7 +653,7 @@ export default function Dashboard({ medData, onMedUpdate, onReset }) {
               </div>
               <div style={{ flex: 1, minHeight: 100 }}>
                 {running && metrics.heartRate > 0 ? (
-                  <Waveform hr={metrics.heartRate} color="var(--accent)" height={130}/>
+                  <Waveform signal={ppgBuf.current} color="var(--accent)" height={130}/>
                 ) : (
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "var(--fg-dim)", fontSize: 12 }}>
                     <span className="mono" style={{ letterSpacing: "0.1em" }}>
@@ -684,7 +675,7 @@ export default function Dashboard({ medData, onMedUpdate, onReset }) {
             <MetricCard Icon={IconFlame}    label={t("mc.stress")}   value={metrics.arousal}    unit="%"   history={history.arousal}    warn={50} danger={70}/>
             <MetricCard Icon={IconSparkle}  label={t("mc.fatigue")}  value={metrics.drowsiness} unit="%"   history={history.drowsiness} warn={40} danger={65}/>
             <MetricCard Icon={IconHeart}    label={t("mc.hr")}       value={Math.round(metrics.heartRate)} unit="bpm" history={history.heartRate} max={140} warn={95} danger={110}/>
-            <MetricCard Icon={IconLung}     label={t("mc.spo2")}     value={metrics.oxygen}     unit="%"   history={history.oxygen}    warn={95} danger={92} inverse/>
+            <MetricCard Icon={IconLung}     label={t("mc.spo2")}     value={metrics.oxygen}     unit="%"   history={history.oxygen}    warn={95} danger={92} inverse available={metrics.oxygen > 0}/>
             <MetricCard Icon={IconBrain}    label={t("mc.blink")}    value={metrics.blinkRate}  unit="/min" history={[]} max={40} warn={25} danger={35}/>
             <MetricCard Icon={IconShield}   label={t("mc.yawn")}     value={metrics.yawnLevel}  unit="%"   history={[]} warn={50} danger={75}/>
             <MetricCard Icon={IconAlert}    label={t("mc.grimace")}  value={metrics.grimace}    unit="%"   history={history.grimace} warn={50} danger={75}/>
